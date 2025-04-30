@@ -1,0 +1,12 @@
+# Python virtual environment
+pyenv/
+
+# Compiled python files
+__pycache__/
+*.pyc
+
+*.pkl
+*.html
+
+# MAC
+.DS_Store

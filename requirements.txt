@@ -1,0 +1,12 @@
+numpy
+pandas
+
+requests
+selenium
+bs4
+
+matplotlib
+seaborn
+plotly
+
+ipykernel
