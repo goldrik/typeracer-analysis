@@ -18,6 +18,8 @@ from time import time, sleep
 import os
 import re
 
+from ParseSoup import *
+
 
 #%%
 user = 'goldrik'
@@ -166,7 +168,7 @@ def get_next_missing_index(indices:list) -> None|int:
 
 def adjust_dataframe_indices(df:pd.DataFrame, sortDesc:bool=True) -> pd.DataFrame:
     duplicate_inds = df.index.duplicated(keep='first')
-    print(f'Dropping {duplicate_inds.sum()} duplicate races')
+    print(f'Dropping {duplicate_inds.sum()} duplicate rows')
 
     df = df[~duplicate_inds]
 
@@ -193,7 +195,7 @@ def populate_races(races):
         
         starttime_ = time()
         soup = BeautifulSoup(html, 'html.parser')
-        races_ = parse_races_soup(soup)
+        races_ = parse_races(soup)
         print(f'...parsed in {time()-starttime_:0.2f} seconds', end='\n')
         
         races = pd.concat([races, races_])
@@ -205,26 +207,6 @@ def populate_races(races):
     races = adjust_dataframe_indices(races)
 
     return races
-
-
-def parse_races_soup(soup:BeautifulSoup) -> pd.DataFrame:
-    # Extract data rows from the 'Scores__Table__Row' divs
-    rows_html = soup.find_all('div', class_='Scores__Table__Row')
-
-    # Cols to save into the DataFrame
-    rows_df = ['WPM', 'Accuracy', 'Points', 'Rank', 'Players', 'Date']
-    rows = {c:[] for c in ['Race'] + rows_df}
-    for row_html in rows_html:
-        row_text = [col.get_text(strip=True) for col in row_html.find_all('div')]
-        rows['Race'].append(int(row_text[0]))
-        rows['WPM'].append(int(row_text[1][:-4]))
-        rows['Accuracy'].append(float(row_text[2][:-1]))
-        rows['Points'].append(int(row_text[3]))
-        rows['Rank'].append(int(row_text[4][0]))
-        rows['Players'].append(int(row_text[4][-1]))
-        rows['Date'].append(str_to_datetime(row_text[5]))
-
-    return pd.DataFrame( {k:rows[k] for k in rows_df}, index=rows['Race'])
 
 
 def get_races_url_start(races:pd.DataFrame, totalRaces:int, numRacesToLoad:int=100) -> str:
@@ -283,8 +265,12 @@ def populate_racers(racers, races, toLoad:int=np.inf):
         soup = BeautifulSoup(html, 'html.parser')
 
         try:
-            dt, textID, typingLog, players, players_wpms, players_accs, players_tls = \
-                parse_race_soup(soup, races.loc[race])
+            # dt, textID, typingLog, players, players_wpms, players_accs, players_tls = \
+            #     parse_race(soup, races.loc[race])
+            
+            dt, textID, players, players_wpms, players_accs, players_tls = \
+                parse_race_self(soup)
+            typingLog = players_tls[races.loc[race]['Rank'] - 1]
         except:
             print(f'\t...failed to parse race {race}. Skipping')
             continue
@@ -313,77 +299,122 @@ def populate_racers(racers, races, toLoad:int=np.inf):
     return racers, races
 
 
-def parse_race_soup(soup:BeautifulSoup, raceRow:pd.Series) -> tuple:
+
+def parse_race_self(soup:BeautifulSoup):
     # TEXT ID
     textID = int( soup.find('a', string='see stats')['href'].split('?id=')[-1] )
-    typingLog = soup.find('script', string=lambda st: 'typingLog' in st).text.strip()[17:-2]
 
     # Find the race details table
     table = soup.find('table', class_='raceDetails')
     rows = table.find_all('tr')
 
-    links = soup.find_all('a')
-
-    nRacers = raceRow['Players']
-    userRank = raceRow['Rank']
-
-    players = ['Guest' if i+1 != userRank else user for i in range(nRacers) ]
-    players_wpms = [-1 if i+1 != userRank else int(raceRow['WPM']) for i in range(nRacers)]
-    players_accs = [np.nan if i+1 != userRank else float(raceRow['Accuracy']) for i in range(nRacers)]
-    players_tls = ['' if i+1 != userRank else typingLog for i in range(nRacers)]
-
     for row in rows:
         cols = row.find_all('td')
         col_name = cols[0].get_text(strip=True)
+        col_val = cols[1].get_text(strip=True)
+
+        if col_name == 'Racer':
+            user = cols[1].find('a')['href'][13:]
+        if col_name == 'Race Number':
+            race = int(col_val)
+
         if col_name == 'Date':
-            col_val = cols[1].get_text(strip=True)
             dt = str_to_datetime(col_val)
+
+        if col_name == 'Rank':
+            nRacers = int(col_val[-2])
 
         if col_name == 'Opponents':
             opps_links = cols[1].find_all('a')
             opps = [link.text for link in opps_links]
             opp_inds = [int(link['href'].split('|')[-1]) for link in opps_links]
 
-            rank_texts = cols[1].find_all(string=(lambda x: 'place' in x))
-            ranks = [int(text[2]) for text in rank_texts]
+    players = [user] + opps
+    inds = [race] + opp_inds
 
-            for opp, opp_race_ind, rank in zip(opps, opp_inds, ranks):
-                wpm,acc, tl = get_opp_race_info(opp, opp_race_ind)
 
-                players[rank-1] = opp
-                players_wpms[rank-1] = wpm
-                players_accs[rank-1] = acc
-                players_tls[rank-1] = tl
+    players_users = ['Guest'] * nRacers
+    players_wpms = [-1] * nRacers
+    players_accs = [np.nan] * nRacers
+    players_tls = [''] * nRacers
+    for player, race in zip(players, inds):
+        if player == user:
+            soup_ = soup
+        else:
+            html_ = read_url(wp_race.format(player, race), htmls)
+            soup_ = BeautifulSoup(html_, 'html.parser')
+
+        wpm, acc, rank, tl = parse_race(soup_)
+        players_users[rank-1] = player
+        players_wpms[rank-1] = wpm
+        players_accs[rank-1] = acc
+        players_tls[rank-1] = tl
 
 
     # ONLY IF SELENIUM USED
     if False:
         mistakes, section_texts, section_wpms = mistakes_sections_from_soup(soup)
 
-    return dt, textID, typingLog, players, players_wpms, players_accs, players_tls
+    return dt, textID, players_users, players_wpms, players_accs, players_tls
 
 
 
-# ONLY IF SELENIUM USED TO LOAD HTML
-def mistakes_sections_from_soup(soup:BeautifulSoup):
-    # MISTAKES
-    mistake_list = soup.select('table.WordsWithErrors ol.content div.replayWord')
-    mistakes = [div.get_text(strip=True) for div in mistake_list]
-    # SECTIONS
-    tds = [tbody.find_all('td') for tbody in soup.find_all('tbody')][-1]
-    assert(len(tds) == 16)
-    section_texts = [td.text.strip() for td in tds[::2]]
-    section_wpms = [float(td.text.strip()) for td in tds[1::2]]
 
-    # ! The final section_text does not seem to include the last character
-    # ! Unsure if this happens always, or only when there's a period, or something
 
-    return mistakes, section_texts, section_wpms
+# def parse_race(soup:BeautifulSoup, raceRow:pd.Series) -> tuple:
+#     # TEXT ID
+#     textID = int( soup.find('a', string='see stats')['href'].split('?id=')[-1] )
+#     typingLog = soup.find('script', string=lambda st: 'typingLog' in st).text.strip()[17:-2]
+
+#     # Find the race details table
+#     table = soup.find('table', class_='raceDetails')
+#     rows = table.find_all('tr')
+
+#     links = soup.find_all('a')
+
+#     nRacers = raceRow['Players']
+#     userRank = raceRow['Rank']
+
+#     players = ['Guest' if i+1 != userRank else user for i in range(nRacers) ]
+#     players_wpms = [-1 if i+1 != userRank else int(raceRow['WPM']) for i in range(nRacers)]
+#     players_accs = [np.nan if i+1 != userRank else float(raceRow['Accuracy']) for i in range(nRacers)]
+#     players_tls = ['' if i+1 != userRank else typingLog for i in range(nRacers)]
+
+#     for row in rows:
+#         cols = row.find_all('td')
+#         col_name = cols[0].get_text(strip=True)
+#         if col_name == 'Date':
+#             col_val = cols[1].get_text(strip=True)
+#             dt = str_to_datetime(col_val)
+
+#         if col_name == 'Opponents':
+#             opps_links = cols[1].find_all('a')
+#             opps = [link.text for link in opps_links]
+#             opp_inds = [int(link['href'].split('|')[-1]) for link in opps_links]
+
+#             rank_texts = cols[1].find_all(string=(lambda x: 'place' in x))
+#             ranks = [int(text[2]) for text in rank_texts]
+
+#             for opp, opp_race_ind, rank in zip(opps, opp_inds, ranks):
+#                 wpm,acc, tl = parse_opponent_race(opp, opp_race_ind)
+
+#                 players[rank-1] = opp
+#                 players_wpms[rank-1] = wpm
+#                 players_accs[rank-1] = acc
+#                 players_tls[rank-1] = tl
+
+
+#     # ONLY IF SELENIUM USED
+#     if False:
+#         mistakes, section_texts, section_wpms = mistakes_sections_from_soup(soup)
+
+#     return dt, textID, typingLog, players, players_wpms, players_accs, players_tls
+
 
 
 # For a particular user and race, read their race page and extract
 #   average wpm, accuracy, and the typing log string
-def get_opp_race_info(user:str, race:int) -> tuple:
+def parse_opponent_race(user:str, race:int) -> tuple:
     html = read_url(wp_race.format(user, race), htmls)
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -407,9 +438,29 @@ def get_opp_race_info(user:str, race:int) -> tuple:
             col_val = cols[1].get_text(strip=True)
             accuracy = float(col_val[:-1])
 
-    typingLog = soup.find('script', string=lambda st: 'typingLog' in st).text.strip()[17:-2]
+    typingLog = extract_typing_log(soup)
 
     return wpm, accuracy, typingLog
+
+
+
+# ONLY IF SELENIUM USED TO LOAD HTML
+def mistakes_sections_from_soup(soup:BeautifulSoup):
+    # MISTAKES
+    mistake_list = soup.select('table.WordsWithErrors ol.content div.replayWord')
+    mistakes = [div.get_text(strip=True) for div in mistake_list]
+    # SECTIONS
+    tds = [tbody.find_all('td') for tbody in soup.find_all('tbody')][-1]
+    assert(len(tds) == 16)
+    section_texts = [td.text.strip() for td in tds[::2]]
+    section_wpms = [float(td.text.strip()) for td in tds[1::2]]
+
+    # ! The final section_text does not seem to include the last character
+    # ! Unsure if this happens always, or only when there's a period, or something
+
+    return mistakes, section_texts, section_wpms
+
+
 
 
 ### READ HTML: TEXT
@@ -432,7 +483,7 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
                 soup = BeautifulSoup(html, 'html.parser')
 
                 text, title, text_type, author, submitter, wpm, acc = \
-                    parse_text_soup(textID)
+                    parse_text_soup(soup)
             except:
                 print(f'\t...failed to parse text {textID}. Skipping')
                 continue
@@ -544,7 +595,8 @@ if races.index[-1] != 1:
 
 #%%
 ## RACES
-racers, races = populate_racers(racers, races, 25)
+# racers, races = populate_racers(racers, races, 25)
+racers, races = populate_racers(racers, races)
 
 
 
