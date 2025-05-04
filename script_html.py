@@ -5,6 +5,7 @@
 #!%load_ext autoreload
 #!%autoreload 2
 
+from bs4.element import NavigableString, PageElement
 import numpy as np
 import pandas as pd
 
@@ -13,22 +14,19 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 import pickle
-from datetime import datetime, timedelta
 from time import time, sleep
 import os
-import re
 
-from ParseSoup import *
+from parse_soup import *
+from typeracer_utils import *
 
 
 #%%
-user = 'goldrik'
+USER = 'goldrik'
 FH_PKL = '.'
-
-
 
 
 
@@ -46,7 +44,7 @@ str_date_invalid = 'No results matching the given search criteria.'
 str_race_invalid = 'Requested data not found'
 str_older = 'load older results'
 
-FN_PKL_USER = os.path.join(FH_PKL, f'typeracer_{user}.pkl')
+FN_PKL_USER = os.path.join(FH_PKL, f'typeracer_{USER}.pkl')
 FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
 
 
@@ -117,80 +115,17 @@ def read_url(wp:str, htmlDict:dict=None, useSelenium:bool=False) -> str:
     return html
 
 
-# Convert string (from webpage) to datetime
-def str_to_datetime(col_str:str):
-    # Special case: Sept
-    col_str = col_str.replace('Sept', 'Sep')
-
-    if col_str.strip().lower() == "today":
-        return datetime.today().date()
-    if '+' in col_str:
-        return datetime.strptime(col_str, '%a, %d %b %Y %H:%M:%S %z').date()
-    if '.' in col_str:
-        return datetime.strptime(col_str, '%b. %d, %Y').date()
-    else:
-        return datetime.strptime(col_str, '%B %d, %Y').date()
-    
-# Takes datetime (from DataFrame) and converts to date string for webpage
-#   This is done to retrieve races missing from DataFrame, i.e. races preceding the given date
-#   increment the date so that the webpage returns races from the current day as well (some may have been missed)
-def next_day_to_str(dt) -> str:
-    return (dt + timedelta(days=1)).strftime('%Y-%m-%d')
-
-
-# Get number of races for given user
-def get_nraces(user:str) -> int:
-    html = read_url(wp_user.format(user))
-    soup = BeautifulSoup(html, 'html.parser')
-
-    stats = soup.find_all('div', class_='Profile__Stat')
-    for stat in stats:
-        label = stat.find('span', class_='Stat__Btm')
-        if label.text.strip() == 'Races':
-            value = stat.find('span', class_='Stat__Top')
-            return int(value.text.strip().replace(',', ''))
-        
-    raise Exception('ERROR: Parsing User webpage failed')
-
-
-# From a list of indices, get the largest missing indices 
-#   (if the indices were sorted in reverse)
-def get_next_missing_index(indices:list) -> None|int:
-    if len(indices) == 0:
-        return None
-
-    indices = sorted(indices, reverse=True)
-    indices.append(0)
-
-    for i in range(len(indices) - 1):
-        if (indices[i] - indices[i+1]) > 1:
-            return indices[i] - 1
-    
-    return None
-
-
-def adjust_dataframe_indices(df:pd.DataFrame, sortDesc:bool=True) -> pd.DataFrame:
-    duplicate_inds = df.index.duplicated(keep='first')
-    print(f'Dropping {duplicate_inds.sum()} duplicate rows')
-
-    df = df[~duplicate_inds]
-
-    if sortDesc:
-        df.sort_index(ascending=False, inplace=True)
-    
-    return df
-
 
 ###
 def init_dataframes():
     races = pd.DataFrame(dtype=int, 
-        columns=['WPM', 'Accuracy', 'Points', 'Rank', 'Players', 'Date', 'DateTime', 'TextID', 'TypingLog', 'Mistakes', ])
+        columns=['WPM', 'Accuracy', 'Points', 'Rank', 'Players', 'Date', 'DateTime', 'TextID', 'TypingLog', ])
     for col in ['Accuracy']: races[col] = races[col].astype(float)
-    for col in ['Date', 'DateTime', 'TypingLog', 'Mistakes']: races[col] = races[col].astype(object)
+    for col in ['Date', 'DateTime', 'TypingLog']: races[col] = races[col].astype(object)
 
     racers = pd.DataFrame(columns=['Racers', 'WPMs', 'Accuracies', 'TypingLogs'], dtype=object)
 
-    sections = pd.DataFrame(columns=['TextID', 'Texts', 'TextInds', 'WPMs'], dtype=object)
+    sections = pd.DataFrame(columns=['TextID', 'TypingLog', 'Sections', 'StartInds', 'WPMs', 'Mistakes'], dtype=object)
     for col in ['TextID']: sections[col] = sections[col].astype(int)
 
     texts = pd.DataFrame(columns=['Text', 'Title', 'Type', 'Author', 'Submitter', 'WPM', 'Accuracy', 'Races'], dtype=object)
@@ -199,9 +134,21 @@ def init_dataframes():
 
     return races, racers, sections, texts
 
+
 ## READ HTML: RACES
-def populate_races(races):
-    wp = get_races_url_start(races, Nraces)
+# Note, this may load slighty more races than given by numToLoad
+def populate_races(races, numToLoad=None):
+    # First, get the total number of races
+    html = read_url(wp_user.format(USER))
+    soup = BeautifulSoup(html, 'html.parser')
+
+    n_races = extract_num_races(soup)
+
+    if numToLoad is None:
+        numToLoad = n_races
+    racesToLoad = range(n_races, n_races-numToLoad, -1)
+
+    wp = get_next_races_url(races, racesToLoad)
 
     starttime = time()
     for _ in range(3):
@@ -221,76 +168,99 @@ def populate_races(races):
         
         races = pd.concat([races, races_])
 
-        wp = get_races_url_next(races, soup, races_.index.min())
+        wp = get_next_races_url(races, racesToLoad, lastRaceLoaded=races_.index.min(), currentPageSoup=soup)
 
     print(f'\nCompleted in {(time()-starttime)/60:0.2f} minutes')
 
-    races = adjust_dataframe_indices(races)
-
+    races = adjust_dataframe_index(races)
     return races
 
 
-def get_races_url_start(races:pd.DataFrame, totalRaces:int, numRacesToLoad:int=100) -> str:
-    # Default, load the latest races
-    wp_def = wp_races.format(user, numRacesToLoad, '')
-
-    # No races loaded -> start from beginning
-    if races.empty:
-        return wp_def
-    
-    # All races loaded -> return no url
-    if totalRaces == races.index.max():
-        return ''
-    
+# Given the list of loaded races and list of races to load
+#   return the URL to load the next set of missing races
+# lastRaceLoaded and currentPageSoup are used handle the "older results" link
+#   both or neither variable must be set at once
+def get_next_races_url(races:pd.DataFrame, raceInds:int, numRacesToLoad:int=100, 
+                       lastRaceLoaded:int=None, currentPageSoup:BeautifulSoup=None) -> str:
     # Gaps in races dataframe which may need to be filled in
-    ind = get_next_missing_index(races.index)
-    if ind:
-        search_date = next_day_to_str(races.loc[ind+1, 'Date'])
-        return wp_races.format(user, numRacesToLoad, search_date)
-
-    raise Exception('ERROR: races DataFrame parsing failed')
-
-
-def get_races_url_next(races:pd.DataFrame, currentPageSoup:BeautifulSoup, lastRaceLoaded:int, numRacesToLoad:int=100) -> str:
-    ind = get_next_missing_index(races.index)
-    
-    # If the races matrix is complete, return no url
-    if ind is None:
+    inds = get_missing_indices(races, raceInds)
+    if not inds.size:
+        # All races loaded -> return no url
         return ''
+    
+    ind = inds.max()
+    # If the latest race is missing, start from the beginning
+    if ind == np.max(raceInds):
+        return wp_races.format(USER, numRacesToLoad, '')
     
     # Check if this index matches the final index in the recently loaded races
     if (ind+1) == lastRaceLoaded:
-        older_div = currentPageSoup.find('a', string=lambda text: str_older in text.lower())
+        if currentPageSoup is None:
+            raise Exception('ERROR: currentPageSoup must be set if lastRaceLoaded is input')
+        older_div = currentPageSoup.find('a', 
+                                            string=lambda text: str_older in text.lower())
         if older_div is None:
             raise Exception('ERROR: Could not find "load older results" link')
         
         return wp_base + 'race_history' + older_div['href']
-
+    
+    # Otherwise, start from the date (right after) the missing race
     search_date = next_day_to_str(races.loc[ind+1, 'Date'])
-    return wp_races.format(user, numRacesToLoad, search_date)
+    return wp_races.format(USER, numRacesToLoad, search_date)
 
+
+# def get_races_url_start(races:pd.DataFrame, totalRaces:int, numRacesToLoad:int=100) -> str:
+#     # Gaps in races dataframe which may need to be filled in
+#     inds = get_missing_indices(races, totalRaces)
+#     if not inds.size:
+#         # All races loaded -> return no url
+#         return ''
+    
+#     ind = inds.max()
+#     # If the latest race is missing, start from the beginning
+#     if ind == totalRaces:
+#         return wp_races.format(USER, numRacesToLoad, '')
+    
+#     # Otherwise, start from the date (right after) the missing race
+#     search_date = next_day_to_str(races.loc[ind+1, 'Date'])
+#     return wp_races.format(USER, numRacesToLoad, search_date)
+
+
+# def get_races_url_next(races:pd.DataFrame, currentPageSoup:BeautifulSoup, lastRaceLoaded:int, numRacesToLoad:int=100) -> str:
+#     inds = get_missing_indices(races)
+#     # Races dataframe is complete -> return no url
+#     if not inds.size:
+#         return ''
+    
+#     ind = inds.max()
+#     # Check if this index matches the final index in the recently loaded races
+#     if (ind+1) == lastRaceLoaded:
+#         older_div = currentPageSoup.find('a', string=lambda text: str_older in text.lower())
+#         if older_div is None:
+#             raise Exception('ERROR: Could not find "load older results" link')
+        
+#         return wp_base + 'race_history' + older_div['href']
+
+#     # Otherwise, take the next missing race and start from its date (techically the day after)
+#     search_date = next_day_to_str(races.loc[ind+1, 'Date'])
+#     return wp_races.format(USER, numRacesToLoad, search_date)
 
 
 
 ### READ HTML: RACE
-def populate_racers(racers, races, toLoad:int=np.inf):
+def populate_racers(racers, races):
     # Check which races we have not loaded yet
-    #   i.e. dont have DateTime, racers, or sections
-    racesToLoad = races[races['DateTime'].isna() | ~races.index.isin(racers.index)].index
-    racesToLoad = racesToLoad[:min(len(racesToLoad), toLoad)]
+    racesToLoad = get_missing_indices(racers, races)
 
     races_dict = {c:[] for c in ['Race', 'DateTime', 'TextID', 'TypingLog']}
     racers_dict = {c:[] for c in racers.columns}
 
     for race in racesToLoad:
-        wp = wp_race.format(user, race)
+        wp = wp_race.format(USER, race)
         html = read_url(wp, htmls, useSelenium=False)
         soup = BeautifulSoup(html, 'html.parser')
 
         try:
-            # dt, textID, typingLog, players, players_wpms, players_accs, players_tls = \
-            #     parse_race(soup, races.loc[race])
-            
             dt, textID, players, players_wpms, players_accs, players_tls = \
                 parse_race_self(soup)
             typingLog = players_tls[races.loc[race]['Rank'] - 1]
@@ -308,7 +278,6 @@ def populate_racers(racers, races, toLoad:int=np.inf):
         racers_dict['Accuracies'].append(players_accs)
         racers_dict['TypingLogs'].append(players_tls)
 
-
     race_inds = races_dict.pop('Race')
     if len(race_inds):
         racers_ = pd.DataFrame(racers_dict, index=race_inds)
@@ -317,15 +286,16 @@ def populate_racers(racers, races, toLoad:int=np.inf):
                 races.loc[race, c] = races_dict[c][r]
 
         racers = pd.concat([racers, racers_])
-        racers = adjust_dataframe_indices(racers)
+        racers = adjust_dataframe_index(racers)
 
+    races['TextID'] = races['TextID'].astype(int)
     return racers, races
 
 
 
 # Return infrmation used to populate the typeracer dataframes
 #   For the user, this includes the text id, precise datetime, and opponent info
-# Opponent information is parsed using parse_race()
+# Opponent information is parsed using parse_soup.parse_race()
 # https://data.typeracer.com/pit/result ...
 def parse_race_self(soup:BeautifulSoup):
     # TEXT ID
@@ -360,8 +330,6 @@ def parse_race_self(soup:BeautifulSoup):
         mistakes, section_texts, section_wpms = mistakes_sections_from_soup(soup)
 
     return R['datetime'], textID, players_users, players_wpms, players_accs, players_tls
-
-
 
 
 
@@ -402,7 +370,7 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
         texts_ = pd.DataFrame(texts_dict, index=textIDs)
         texts = pd.concat([texts, texts_])
 
-        texts = adjust_dataframe_indices(texts, sortDesc=False)
+        texts = adjust_dataframe_index(texts, sortDesc=False)
 
     # Update races (for each text)
     for textID in texts.index:
@@ -414,7 +382,6 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
 
 #%%
 ## PICKLE
-
 # First, check for data loaded already
 
 # htmls - dictionary url -> html
@@ -426,13 +393,12 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
 # sections - sections per race
 # texts - all races
 
-if os.path.exists(FN_PKL_USER):
+# if os.path.exists(FN_PKL_USER):
+if False:
     with open(FN_PKL_USER, 'rb') as f:
         races, racers, sections, texts = pickle.load(f)
 else:
-    pass
-
-races, racers, sections, texts = init_dataframes()
+    races, racers, sections, texts = init_dataframes()
     
 
 if os.path.exists(FN_PKL_HTMLS):
@@ -442,16 +408,11 @@ else:
     htmls = {}
 
 
-#%%
-## USER
-# First, get the number of races
-Nraces = get_nraces(user)
-
 
 #%%
 ## RACES
-races = populate_races(races)
-nRaces = len(races)
+# races = populate_races(races)
+races = populate_races(races, 185)
 
 if not races.index.is_monotonic_decreasing:
     print('Warning: Races is not monotonic decreasing')
@@ -461,10 +422,7 @@ if races.index[-1] != 1:
 
 #%%
 ## RACES
-# racers, races = populate_racers(racers, races, 25)
 racers, races = populate_racers(racers, races)
-
-
 
 
 #%%
@@ -480,7 +438,6 @@ texts = populate_texts(texts, races)
 
 #%%
 ## SAVE
-
 with open(FN_PKL_USER, 'wb') as f:
     pickle.dump([races, racers, sections, texts], f)
 with open(FN_PKL_HTMLS, 'wb') as f:
@@ -488,19 +445,10 @@ with open(FN_PKL_HTMLS, 'wb') as f:
 
 
 
-# %%
-
-if False:
-    wp_ = 'https://data.typeracer.com/pit/text_info?id=4950000'
-    html_ = requests.get(wp_).text
-    soup_ = BeautifulSoup(html_, 'html.parser')
-    with open('wp.html', 'w') as f:
-        f.write(html_)
-
 #%%
 
 
-read_url(wp_race.format(user, 7506), useSelenium=True)
+# a = read_url(wp_race.format(USER, 7506), useSelenium=True)
 # selenium HTTPConnectionPool(host='localhost', port=52298): Read timed out. (read timeout=120)
 
 
