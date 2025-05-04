@@ -9,112 +9,43 @@ from bs4.element import NavigableString, PageElement
 import numpy as np
 import pandas as pd
 
-import requests
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup, Tag
 
+import os
+import dotenv
 import pickle
 from time import time, sleep
-import os
 
 from parse_soup import *
 from typeracer_utils import *
 
 
 #%%
-USER = 'goldrik'
-FH_PKL = '.'
-
+## ENV VARS
+dotenv.load_dotenv()
+USER: str = os.getenv('USER')
+FH_PKL: str = os.getenv('FH_PKL')
 
 
 #%%
-
+## VARS
+# URL format strings
 wp_base = 'https://data.typeracer.com/pit/'
 wp_user = wp_base + 'profile?user={}'
 wp_races = wp_base + 'race_history?user={}&n={}&startDate={}'
 wp_race = wp_base + 'result?id=|tr:{}|{}'
 wp_text = wp_base + 'text_info?id={}'
 
-str_user_invalid0 = 'We couldn\'t find a profile for username'
-str_user_invalid1 = 'There is no user'
-str_date_invalid = 'No results matching the given search criteria.'
-str_race_invalid = 'Requested data not found'
-str_older = 'load older results'
-
 FN_PKL_USER = os.path.join(FH_PKL, f'typeracer_{USER}.pkl')
 FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
 
 
 # Set up Chrome
-options = webdriver.chrome.options.Options()
-options.add_argument('--headless')
-options.add_argument('--disable-gpu')
-driver = webdriver.Chrome(options=options)
-
+selenium_driver = get_selenium_driver()
+# pd.options.mode.copy_on_write = True
 
 #%%
 ## FUNCTIONS
-
-# Return HTML text from given URL
-#   Option: Save html to dictionary so to prevent repeat loading
-def read_url(wp:str, htmlDict:dict=None, useSelenium:bool=False) -> str:
-    print(wp)
-
-    # TODO handle case where loaded HTML (in dict) was not loaded with selenium
-    if htmlDict is not None:
-        if wp in htmlDict:
-            return htmlDict[wp]
-
-    # Define the two ways to read the URL
-    #   This is done to facilitate multiple calls (in case of timeout)
-    if not useSelenium:
-        def getHTML(url) -> str: return requests.get(url).text
-    else:
-        def getHTML(url) -> str:
-            driver.get(url)
-
-            # WAIT for the chart's aria-label div to appear
-            #   This is only applicable for the race result page 
-            #   (with javascript running to compute mistakes and section WPMs)
-            # if 'result' in url:
-            # webdriver.support.ui.WebDriverWait(driver, 15).until(
-                # webdriver.support.expected_conditions.presence_of_element_located((webdriver.common.by.By.CSS_SELECTOR, 'div[aria-label="A tabular representation of the data in the chart."]'))
-            # )
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label="A tabular representation of the data in the chart."]'))
-            )
-
-            return driver.page_source
-    
-    html = getHTML(wp)
-    # Account for request timeout
-    for s in [5, 10, 20,60]:
-        # If HTML loaded successfully, we're done
-        if html:
-            break
-        print(f'\tTimeout occurred, retrying in {s}...')
-        sleep(s)
-        html = getHTML(wp)
-    
-    # Handle exceptions
-    if not html:
-        raise Exception('Error: Request timed out indefinitely, exiting...')
-    if (str_user_invalid0 in html) or (str_user_invalid1 in html):
-        raise Exception('Error: Invalid user given, exiting...')
-    if str_date_invalid in html:
-        raise Exception('Error: Invalid date given, exiting...')
-    if str_race_invalid in html:
-        raise Exception('Error: Invalid race information given, exiting...')
-
-    if htmlDict is not None:
-        htmlDict[wp] = html
-
-    return html
-
-
 
 ###
 def init_dataframes():
@@ -125,34 +56,38 @@ def init_dataframes():
 
     racers = pd.DataFrame(columns=['Racers', 'WPMs', 'Accuracies', 'TypingLogs'], dtype=object)
 
-    sections = pd.DataFrame(columns=['TextID', 'TypingLog', 'Sections', 'StartInds', 'WPMs', 'Mistakes'], dtype=object)
-    for col in ['TextID']: sections[col] = sections[col].astype(int)
+    typedata = pd.DataFrame(columns=['TextID', 'TypingLog', 'Sections', 'StartInds', 'WPMs', 'Mistakes'], dtype=object)
+    for col in ['TextID']: typedata[col] = typedata[col].astype(int)
 
     texts = pd.DataFrame(columns=['Text', 'Title', 'Type', 'Author', 'Submitter', 'WPM', 'Accuracy', 'Races'], dtype=object)
     for col in ['WPM']: texts[col] = texts[col].astype(int)
     for col in ['Accuracy']: texts[col] = texts[col].astype(float)
 
-    return races, racers, sections, texts
+    return races, racers, typedata, texts
 
 
 ## READ HTML: RACES
-# Note, this may load slighty more races than given by numToLoad
 def populate_races(races, numToLoad=None):
     # First, get the total number of races
     html = read_url(wp_user.format(USER))
     soup = BeautifulSoup(html, 'html.parser')
 
+    indsPrev = races.index
+
     n_races = extract_num_races(soup)
+    racesMissing = get_missing_indices(races, n_races)
 
     if numToLoad is None:
         numToLoad = n_races
-    racesToLoad = range(n_races, n_races-numToLoad, -1)
+    racesToLoad = racesMissing[:numToLoad]
 
-    wp = get_next_races_url(races, racesToLoad)
+    # This is what the dataframe indices should be afterwards
+    indsAfter = np.array(list(set(indsPrev) | set(racesToLoad)))
+
+    wp = get_next_races_url(races, racesToLoad, n_races)
 
     starttime = time()
-    for _ in range(3):
-    # while wp != '': 
+    while wp != '': 
         starttime_ = time()
         try:
             html = read_url(wp)
@@ -168,10 +103,11 @@ def populate_races(races, numToLoad=None):
         
         races = pd.concat([races, races_])
 
-        wp = get_next_races_url(races, racesToLoad, lastRaceLoaded=races_.index.min(), currentPageSoup=soup)
+        wp = get_next_races_url(races, racesToLoad, n_races, lastRaceLoaded=races_.index.min(), currentPageSoup=soup)
 
     print(f'\nCompleted in {(time()-starttime)/60:0.2f} minutes')
 
+    races = races.loc[indsAfter].copy()
     races = adjust_dataframe_index(races)
     return races
 
@@ -180,17 +116,19 @@ def populate_races(races, numToLoad=None):
 #   return the URL to load the next set of missing races
 # lastRaceLoaded and currentPageSoup are used handle the "older results" link
 #   both or neither variable must be set at once
-def get_next_races_url(races:pd.DataFrame, raceInds:int, numRacesToLoad:int=100, 
+def get_next_races_url(races:pd.DataFrame, raceInds:int, maxRaces:int, numRacesToLoad:int=100, 
                        lastRaceLoaded:int=None, currentPageSoup:BeautifulSoup=None) -> str:
+    str_older = 'load older results'
+
     # Gaps in races dataframe which may need to be filled in
     inds = get_missing_indices(races, raceInds)
     if not inds.size:
         # All races loaded -> return no url
         return ''
     
-    ind = inds.max()
+    ind = inds[0]
     # If the latest race is missing, start from the beginning
-    if ind == np.max(raceInds):
+    if ind == maxRaces:
         return wp_races.format(USER, numRacesToLoad, '')
     
     # Check if this index matches the final index in the recently loaded races
@@ -207,44 +145,6 @@ def get_next_races_url(races:pd.DataFrame, raceInds:int, numRacesToLoad:int=100,
     # Otherwise, start from the date (right after) the missing race
     search_date = next_day_to_str(races.loc[ind+1, 'Date'])
     return wp_races.format(USER, numRacesToLoad, search_date)
-
-
-# def get_races_url_start(races:pd.DataFrame, totalRaces:int, numRacesToLoad:int=100) -> str:
-#     # Gaps in races dataframe which may need to be filled in
-#     inds = get_missing_indices(races, totalRaces)
-#     if not inds.size:
-#         # All races loaded -> return no url
-#         return ''
-    
-#     ind = inds.max()
-#     # If the latest race is missing, start from the beginning
-#     if ind == totalRaces:
-#         return wp_races.format(USER, numRacesToLoad, '')
-    
-#     # Otherwise, start from the date (right after) the missing race
-#     search_date = next_day_to_str(races.loc[ind+1, 'Date'])
-#     return wp_races.format(USER, numRacesToLoad, search_date)
-
-
-# def get_races_url_next(races:pd.DataFrame, currentPageSoup:BeautifulSoup, lastRaceLoaded:int, numRacesToLoad:int=100) -> str:
-#     inds = get_missing_indices(races)
-#     # Races dataframe is complete -> return no url
-#     if not inds.size:
-#         return ''
-    
-#     ind = inds.max()
-#     # Check if this index matches the final index in the recently loaded races
-#     if (ind+1) == lastRaceLoaded:
-#         older_div = currentPageSoup.find('a', string=lambda text: str_older in text.lower())
-#         if older_div is None:
-#             raise Exception('ERROR: Could not find "load older results" link')
-        
-#         return wp_base + 'race_history' + older_div['href']
-
-#     # Otherwise, take the next missing race and start from its date (techically the day after)
-#     search_date = next_day_to_str(races.loc[ind+1, 'Date'])
-#     return wp_races.format(USER, numRacesToLoad, search_date)
-
 
 
 ### READ HTML: RACE
@@ -385,20 +285,24 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
 # First, check for data loaded already
 
 # htmls - dictionary url -> html
+
 # DATAFRAMES
 #   note: index = race (or textid for texts)
-# races - race details
+# races - basic race details
 # racers - list of racers per race
-#          each column 
-# sections - sections per race
-# texts - all races
+#          certain columns are lists 
+#            (e.g list of opponents, their wpms, etc)
+# typedata - typing data per race
+#            includes sections, mistakes, etc
+# texts - all texts found in given races
+
 
 # if os.path.exists(FN_PKL_USER):
 if False:
     with open(FN_PKL_USER, 'rb') as f:
-        races, racers, sections, texts = pickle.load(f)
+        races, racers, typedata, texts = pickle.load(f)
 else:
-    races, racers, sections, texts = init_dataframes()
+    races, racers, typedata, texts = init_dataframes()
     
 
 if os.path.exists(FN_PKL_HTMLS):
@@ -406,7 +310,6 @@ if os.path.exists(FN_PKL_HTMLS):
         htmls = pickle.load(f)
 else:
     htmls = {}
-
 
 
 #%%
@@ -439,7 +342,7 @@ texts = populate_texts(texts, races)
 #%%
 ## SAVE
 with open(FN_PKL_USER, 'wb') as f:
-    pickle.dump([races, racers, sections, texts], f)
+    pickle.dump([races, racers, typedata, texts], f)
 with open(FN_PKL_HTMLS, 'wb') as f:
     pickle.dump(htmls, f)
 
@@ -448,7 +351,7 @@ with open(FN_PKL_HTMLS, 'wb') as f:
 #%%
 
 
-# a = read_url(wp_race.format(USER, 7506), useSelenium=True)
+# a = read_url(wp_race.format(USER, 7506), useSelenium=True, driver=selenium_driver)
 # selenium HTTPConnectionPool(host='localhost', port=52298): Read timed out. (read timeout=120)
 
 
