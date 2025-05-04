@@ -1,11 +1,15 @@
 # Aurik Sarker
 # 30 April 2025
 
-# Contains modules for parsing TypeRacer pages
+# Contains functions for parsing TypeRacer pages
 # The pages must already have been read in (to html string) and procesed using BeautifulSoup
 #   i.e. BeautifulSoup(html, 'html.parser')
 
 # The inputs are all BeautifulSoup objects
+#   https://data.typeracer.com/pit/profile?user={}
+#   https://data.typeracer.com/pit/race_history?user={}&n={}&startDate={}
+#   https://data.typeracer.com/pit/result?id=|tr:{}|{}
+#   https://data.typeracer.com/pit/text_info?id={}
 # The outputs may be
 #   DataFrame - for profile page (table of races)
 #   tuple - for pages corresponding to one single race or text
@@ -13,11 +17,22 @@
 import numpy as np
 import pandas as pd
 
-from datetime import datetime, timedelta
-
 from bs4 import BeautifulSoup
-# TODO change the file structure
-# from script_html import str_to_datetime
+from typeracer_utils import str_to_datetime
+
+##
+# Return number of races
+# https://data.typeracer.com/pit/profile ...
+def extract_num_races(soup:BeautifulSoup) -> int:
+    stats = soup.find_all('div', class_='Profile__Stat')
+    for stat in stats:
+        label = stat.find('span', class_='Stat__Btm')
+        if label.text.strip() == 'Races':
+            value = stat.find('span', class_='Stat__Top')
+            return int(value.text.strip().replace(',', ''))
+        
+    raise Exception('ERROR: Parsing User webpage failed')
+
 
 ##
 # Return DataFrame with basic info for each race found in the table
@@ -171,19 +186,3 @@ def parse_text(soup:BeautifulSoup) -> tuple:
     
     return text_details
 
-
-
-
-# Convert string (from webpage) to datetime
-def str_to_datetime(col_str:str):
-    # Special case: Sept
-    col_str = col_str.replace('Sept', 'Sep')
-
-    if col_str.strip().lower() == "today":
-        return datetime.today().date()
-    if '+' in col_str:
-        return datetime.strptime(col_str, '%a, %d %b %Y %H:%M:%S %z').date()
-    if '.' in col_str:
-        return datetime.strptime(col_str, '%b. %d, %Y').date()
-    else:
-        return datetime.strptime(col_str, '%B %d, %Y').date()
