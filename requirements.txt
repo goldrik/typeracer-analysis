@@ -5,8 +5,11 @@ requests
 selenium
 bs4
 
+ python-dotenv
+
 matplotlib
 seaborn
 plotly
 
+# For ipython scripting
 ipykernel
