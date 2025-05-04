@@ -5,6 +5,8 @@ pyenv/
 __pycache__/
 *.pyc
 
+.env
+
 *.pkl
 *.html
 
