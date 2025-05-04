@@ -13,11 +13,12 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
 
 ##
 # URL HANDLING
 
-# Return HTML text from given URL
+# Return HTML text and BeautifulSoup object from given URL
 #   Option: Save html to dictionary so to prevent repeat loading
 def read_url(wp:str, htmlDict:dict=None, 
              useSelenium:bool=False, driver:webdriver.Chrome=None) -> str:
@@ -39,9 +40,9 @@ def read_url(wp:str, htmlDict:dict=None,
         def getHTML(url) -> str:
             driver.get(url)
 
-
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label="A tabular representation of the data in the chart."]'))
+            WebDriverWait(driver, 20).until(
+                # EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label="A tabular representation of the data in the chart."]'))
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label="A chart."]'))
             )
 
             return driver.page_source
@@ -61,6 +62,7 @@ def read_url(wp:str, htmlDict:dict=None,
     str_user_invalid1 = 'There is no user'
     str_date_invalid = 'No results matching the given search criteria.'
     str_race_invalid = 'Requested data not found'
+    str_text_invalid = 'Text not found'
     
     # Handle exceptions
     if not html:
@@ -71,11 +73,14 @@ def read_url(wp:str, htmlDict:dict=None,
         raise Exception('Error: Invalid date given, exiting...')
     if str_race_invalid in html:
         raise Exception('Error: Invalid race information given, exiting...')
+    if str_text_invalid in html:
+        raise Exception('Error: Invalid text ID given, exiting...')
 
     if htmlDict is not None:
         htmlDict[wp] = html
 
-    return html
+    soup = BeautifulSoup(html, 'html.parser')
+    return html, soup
 
 
 def get_selenium_driver():
@@ -90,18 +95,18 @@ def get_selenium_driver():
 # DATETIME
 
 # Convert string (from webpage) to datetime
-def str_to_datetime(col_str:str):
+def str_to_datetime(date_str:str):
     # Special case: Sept
-    col_str = col_str.replace('Sept', 'Sep')
+    date_str = date_str.replace('Sept', 'Sep')
 
-    if col_str.strip().lower() == "today":
+    if date_str.strip().lower() == "today":
         return datetime.today().date()
-    if '+' in col_str:
-        return datetime.strptime(col_str, '%a, %d %b %Y %H:%M:%S %z').date()
-    if '.' in col_str:
-        return datetime.strptime(col_str, '%b. %d, %Y').date()
+    if '+' in date_str:
+        return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z').date()
+    if '.' in date_str:
+        return datetime.strptime(date_str, '%b. %d, %Y').date()
     else:
-        return datetime.strptime(col_str, '%B %d, %Y').date()
+        return datetime.strptime(date_str, '%B %d, %Y').date()
 
 # Takes datetime (from DataFrame) and converts to date string for webpage
 #   This is done to retrieve races missing from DataFrame, i.e. races preceding the given date
