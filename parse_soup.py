@@ -173,7 +173,13 @@ def parse_text(soup:BeautifulSoup) -> tuple:
 
     text_parts = [text.strip() for text in text_info.text.split('\n')]
 
-    text_details['text'] = text_div.text
+    # NOTE: Text in the raw HTML may include double-spaces (for some reason)
+    # Eliminate these (and any other possible multi-spaces)
+    text_ = text_div.text
+    text_ = text_.replace('\r', ' ').replace('\n', ' ')
+    text_ = ' '.join([w for w in text_.split(' ') if w != ''])
+    text_details['text'] = text_
+
     text_details['title'] = text_info.find('a').text
     text_details['type'] = text_parts[2][1:-1]
     text_details['author'] = text_parts[3][3:]
