@@ -3,119 +3,101 @@
 import re
 
 #%%
-def split_tl(tl):
-    pipe_pattern = r'\|\d+,'
-    pipe_occurence = list(re.finditer(pipe_pattern, tl))
-    return pipe_occurence[-1].start()
 
-
-def tl0_to_char_ms(tl):
+def tl1_to_char_ms(tl, text):
     # Split by |
-    T = tl[:split_tl(tl)]
-    T = T.split(',', 3)[-1]
-
-    ms = []
-    chars = []
-
-    inSpecialChar = False
-    lookingForMs = False
-
-    for c in T:
-        # # ASSUMING NO TEXT HAS THE \ CHARACTER
-
-        if not inSpecialChar:
-            inSpecialChar = c == '\\'
-            if inSpecialChar:
-                continue
-        else:
-            inSpecialChar = c == 'b'
-            if not inSpecialChar:
-                chars.append(c)
-                lookingForMs = True
-            continue
-
-        
-        if lookingForMs:
-            # There is a special case
-            #   lookingForMs=True but first digit is '-' (for negative)
-            # This is handled by just assuming the next char after an accepted char is part of the ms
-            ms.append(c)
-            lookingForMs = False
-        else:
-            if c.isdigit():
-                ms[-1] += c
-            else:
-                chars.append(c)
-                lookingForMs = True
-        
-    ms = [int(m) for m in ms]
-
-    TL = pd.DataFrame({'char':chars, 'ms':ms})
-
-    return TL
-
-
-def tl1_to_char_ms(tl):
-    # Split by |
-    T = tl[split_tl(tl)+1:]
-    T = T.split(',', 2)[-1]
-
+    T = tl[typinglog_pipe(tl)+1:]
     # Do this to make regex better
     T = ',' + T[:-1]
+
+    # Split into words
+    wordnums_pattern = r',(\d+),(\d+),'
+    wordnums_pattern_ = wordnums_pattern.replace('(', '').replace(')', '')
+    # The {ms} portion is easy to handle
+    # Find those using regex and split the string
+    ms_pattern = r',-?\d+,'
+    char_pattern = r'(\d+)([+\-$])(\\"|.)'
 
     # FORMAT
     # ,{ms},{ind+char}+,
     
-    # The {ms} portion is easy to handle
-    # Find those using regex and split the string
-    ms_pattern = r',-?\d+,'
-    char_pattern = r'\d+[+\-$].'
-    char_pattern_groups = r'(\d+)([+\-$])(\\"|.)'
-
-    tt0 = re.findall(ms_pattern, T)
-    tt1 = re.split(ms_pattern, T)[1:]
+    ww0 = re.findall(wordnums_pattern, T)
+    ww1 = re.split(wordnums_pattern_, T)[1:]
 
     ms_all = []
     word_inds = []
     ops = []
     chars = []
 
-    i = -1
+    word_nums = []
     pd_inds = []
-    for t0, t1 in zip(tt0, tt1):
-        ms = int(t0[1:-1])
 
-        strs = re.findall(char_pattern_groups, t1)
-        if len(strs) != 0:
-            i += 1
-        for word_ind, op, char in strs:
-            ms_all.append(ms)
-            ms = 0
+    word_strokes = []
 
-            word_inds.append(int(word_ind))
-            ops.append(op)
-            chars.append(char[-1])
+    words = text.split(' ')
+    assert(len(words) == len(ww0))
 
-            pd_inds.append(i)
+    i = -1
+    w_ = 0
+    for w in range(len(ww0)):
+        W = ',' + ww1[w]
+        tt0 = re.findall(ms_pattern, W)
+        tt1 = re.split(ms_pattern, W)[1:]
 
-    TL = pd.DataFrame({'char':chars, 'ms':ms_all, 'op':ops, 'ind':word_inds}, index=pd_inds)
+        word = words[w]
 
-    return TL
+        word_strokes.append(int(ww0[w][1]))
+        for t0, t1 in zip(tt0, tt1):
+            ms = int(t0[1:-1])
+
+            strs = re.findall(char_pattern, t1)
+            if len(strs) != 0:
+                i += 1
+            for word_ind, op, char in strs:
+                ms_all.append(ms)
+                ms = 0
+
+                word_ind_ = int(word_ind)
+                word_inds.append(word_ind_)
+                ops.append(op)
+                chars.append(char[-1])
+
+                pd_inds.append(i)
+                word_nums.append(w)
+
+                # if word[w] == 
+
+    TL = pd.DataFrame({'word':word_nums, 'ind':word_inds, 'char':chars, 'ms':ms_all, 'op':ops}, index=pd_inds)
+    
+    return TL, word_strokes
 
 
-def tl1_to_words(tl):
-    # Split by |
-    T = tl[split_tl(tl)+1:]
-    T = ',' + T
+def tl_df_to_text(TL):
+    T = len(TL)
+    t = ''
+    word = []
+    for i in range(T):
+        c = TL.iloc[i]['char']
+        word_ind = TL.iloc[i]['ind']
+        op = TL.iloc[i]['op']
 
-    wordnums_pattern = r',(\d+),(\d+),'
+        if op == '+':
+            word.append(c)
+            assert(word[word_ind] == c)
 
-    ww0 = re.findall(wordnums_pattern, T)
+        elif op == '-':
+            assert(word[word_ind] == c)
+            word.pop(word_ind)
 
-    word_inds, word_strokes = zip(*ww0)
-    word_inds = [int(i) for i in word_inds]
-    word_strokes = [int(s) for s in word_strokes]
-    return word_inds, word_strokes
+        elif op == '$':
+            word[word_ind] = c
+            assert(word[word_ind] == c)
+
+        if (i == T-1) or ((c == ' ') and (TL.iloc[i+1]['ind'] == 0) and (TL.iloc[i+1]['op'] == '+')):
+            t += ''.join(word)
+            word = []
+
+    return t
 
 
 #%%
@@ -127,7 +109,7 @@ ind = 7264
 # iive vs live
 ind = 7541
 
-ind = 7511
+# ind = 7511
 
 
 #%%
@@ -146,15 +128,16 @@ for race in inds:
     # numwords = texts.loc[textID, 'NumWords']
 
     chars_total = len(text)
+    words_total = len(text.split(' '))
 
-    if tl.count('|') != 1:
-        print('Warning: Erroneous number of pipes found')
+    assert(tl.count('|') == 1)
+    assert(tl[typinglog_pipe(tl)+1] == '0')
 
-    TL0 = tl0_to_char_ms(tl)
+    TL0 = parse_typinglog_simple(tl)
     assert(''.join(TL0['char']) == text)
 
 
-    TL1 = tl1_to_char_ms(tl)
+    TL1, word_strokes = tl1_to_char_ms(tl, text)
 
 
     # [print(f'{a}\t{b}\t{c}\t{d}') for a,b,c,d in 
@@ -165,92 +148,13 @@ for race in inds:
     wpm1 = (chars_total / 5) / (TL1['ms'].sum() / 1e3 / 60)
     assert(wpm0 == wpm1)
 
-    print(f'{wpm} {wpm1:.2f}')
+    # print(f'{wpm} {wpm1:.2f}')
 
-    word_inds, word_strokes = tl1_to_words(tl)
+    assert(TL1['word'].max()+1 == words_total)
+    assert(sum(word_strokes) == TL1.index[-1]+1)
 
-    T = len(TL1)
-    t = ''
-    word = []
-    for i in range(T):
-        c = TL1.iloc[i]['char']
-        word_ind = TL1.iloc[i]['ind']
-        op = TL1.iloc[i]['op']
+    text_ = tl_df_to_text(TL1)
 
-        if op == '+':
-            word.append(c)
-            assert(word[word_ind] == c)
-
-        elif op == '-':
-            assert(word[word_ind] == c)
-            word.pop(word_ind)
-
-        elif op == '$':
-            word[word_ind] = c
-            assert(word[word_ind] == c)
-
-        if (i == T-1) or ((c == ' ') and (TL1.iloc[i+1]['ind'] == 0) and (TL1.iloc[i+1]['op'] == '+')):
-            t += ''.join(word)
-            word = []
-        
-
-    # words = []
-    # word_strokes_ = word_strokes.copy()
-    # newWord = True
-    # for c in TL1['char']:
-    #     if newWord:
-    #         words.append(c)
-    #         newWord = False
-    #     else:
-    #         words[-1] += c
-
-    #     word_strokes_[0] -= 1
-    #     if word_strokes_[0] == 0:
-    #         word_strokes_.pop(0)
-    #         newWord = True
-
-    # t = ''
-    # for i in range(len(TL1)):
-    #     if TL1['op'].iloc[i] == '+':
-    #         t += TL1['char'].iloc[i]
-    #     elif TL1['op'].iloc[i] == '-':
-    #         # t = t[:-1]
-    #         for j in range(len(t)-1, -1, -1):
-    #             if t[j] == TL1['char'].iloc[i]:
-    #                 t = t[:j] + t[j+1:]
-    #                 break
-        # else:
-        #     t += chars[i] * ms_all[i]
-
-    # chars_str = ''.join(TL1['char'])[::-1]
-    # inds_list = TL1['ind'].to_list()[::-1]
-    # ops_str = ''.join(TL1['op'])[::-1]
-
-    # I = len(TL1)
-    # i = 0
-    # t = ''
-
-    # newWord = False
-    # spaceInds = []
-    # while True:
-    #     t += chars_str[i]
-    #     for wordInd in range(inds_list[i]-1, -1,-1):
-    #         # Find the next index which matches wordInd
-    #         i = inds_list.index(wordInd, i)
-    #         t += chars_str[i]
-    #     i = chars_str.find(' ', i)
-    #     if i == -1:
-    #         break
-
-    #     spaceInds.append(i)
-
-    # t = t[::-1]
-
-            
-            
-        # TL1.iloc[i]['char']
-
-    # # print(t)
-    assert(t == text)
+    assert(text_ == text)
 
 
