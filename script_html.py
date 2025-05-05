@@ -55,8 +55,8 @@ def init_dataframes():
     typedata = pd.DataFrame(columns=['TextID', 'TypingLog', 'Sections', 'StartInds', 'WPMs', 'Mistakes'], dtype=object)
     for col in ['TextID']: typedata[col] = typedata[col].astype(int)
 
-    texts = pd.DataFrame(columns=['Text', 'Title', 'Type', 'Author', 'Submitter', 'WPM', 'Accuracy', 'Races'], dtype=object)
-    for col in ['WPM']: texts[col] = texts[col].astype(int)
+    texts = pd.DataFrame(columns=['Text', 'Title', 'Type', 'Author', 'Submitter', 'WPM', 'Accuracy', 'Races', 'NumWords', 'NumChars'], dtype=object)
+    for col in ['WPM', 'NumWords', 'NumChars']: texts[col] = texts[col].astype(int)
     for col in ['Accuracy']: texts[col] = texts[col].astype(float)
 
     return races, racers, typedata, texts
@@ -258,6 +258,9 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
             texts_dict['Accuracy'].append(T['accuracy'])
 
     if len(textIDs):
+        texts_dict['NumWords'].append([len(text.split(' ')) for text in texts_dict['Text']])
+        texts_dict['NumChars'].append([len(text) for text in texts_dict['Text']])
+
         texts_ = pd.DataFrame(texts_dict, index=textIDs)
         texts = pd.concat([texts, texts_])
 

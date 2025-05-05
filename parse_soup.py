@@ -158,7 +158,7 @@ def mistakes_sections_from_soup(soup:BeautifulSoup):
 ##
 # Parses the text page for details, returns dictionary
 # https://data.typeracer.com/pit/text_info ...
-def parse_text(soup:BeautifulSoup) -> tuple:
+def parse_text(soup:BeautifulSoup) -> dict:
     text_details = {}
 
     # text_regex = r'\((\w+)\) *by (\w.*\w)\s*'
