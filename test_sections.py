@@ -38,7 +38,7 @@ selenium_driver = get_selenium_driver()
 ## TEST
 
 with open(FN_LOG, 'a') as f:
-    printf = lambda string: print(string, file=f)
+    printf = lambda *args, **kwargs: print(*args, **kwargs, file=f)
     for race in races:
         url = url_race.format('goldrik', race)
         printf('================================================================================')
