@@ -80,8 +80,9 @@ with open(FN_LOG, 'a') as f:
         else:
             printf('NO', end=' ')
         printf(f'{num_matches}/{len(section_texts)} sections match')
-        for section0, section1 in zip(section_texts, section_texts_):
-            printf(f'\t\t{section0}\n\t\t{section1}')
+        if not all(matches):
+            for section0, section1 in zip(section_texts, section_texts_):
+                printf(f'\t\t{section0}\n\t\t{section1}')
         if not all(matches):
             # Check if the last section was the only incorrect one (the rest of the sections were fine)
             if all(matches[:-1]):
