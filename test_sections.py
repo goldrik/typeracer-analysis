@@ -27,7 +27,7 @@ _, soup = read_url(url_user.format(user))
 n_races = extract_num_races(soup)
 
 inds = np.arange(1, n_races+1)
-races = np.random.choice(inds, 20, replace=False)
+races = np.random.choice(inds, 2, replace=False)
 
 # races = [7264]
 
@@ -76,10 +76,12 @@ with open(FN_LOG, 'a') as f:
         matches = [section0 == section1 for section0, section1 in zip(section_texts, section_texts_)]
         num_matches = sum(matches)
         if all(matches):
-            printf('YE', end='')
+            printf('YE', end=' ')
         else:
-            printf('NO', end='')
+            printf('NO', end=' ')
         printf(f'{num_matches}/{len(section_texts)} sections match')
+        for section0, section1 in zip(section_texts, section_texts_):
+            printf(f'\t\t{section0}\n\t\t{section1}')
         if not all(matches):
             # Check if the last section was the only incorrect one (the rest of the sections were fine)
             if all(matches[:-1]):
