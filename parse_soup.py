@@ -179,7 +179,7 @@ def parse_text(soup:BeautifulSoup) -> dict:
     # NOTE: Text in the raw HTML may include double-spaces (for some reason)
     # Eliminate these (and any other possible multi-spaces)
     text_ = text_div.text
-    text_ = text_.replace('\r', ' ').replace('\n', ' ')
+    text_ = text_.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
     text_ = ' '.join([w for w in text_.split(' ') if w != ''])
     text_details['text'] = text_
 
