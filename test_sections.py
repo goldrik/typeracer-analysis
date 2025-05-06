@@ -3,6 +3,9 @@
 
 # Test if our computation of text sections matches TypeRacer's
 
+#!%load_ext autoreload
+#!%autoreload 2
+
 import numpy as np
 import pandas as pd
 
@@ -10,8 +13,8 @@ from time import time
 
 from bs4 import BeautifulSoup
 from typeracer_utils import read_url, get_selenium_driver
-from parse_soup import extract_num_races, mistakes_sections_from_soup
-from typing_analysis import text_to_sections
+from parse_soup import extract_num_races, extract_mistakes_sections, extract_typing_log
+from typing_analysis import text_to_sections, parse_typinglog, compute_wpm
 
 from url_formatstrings import url_user, url_race
 
@@ -27,9 +30,10 @@ _, soup = read_url(url_user.format(user))
 n_races = extract_num_races(soup)
 
 inds = np.arange(1, n_races+1)
-races = np.random.choice(inds, 2, replace=False)
+races = np.random.choice(inds, 1, replace=False)
 
 # races = [7264]
+races = [5305]
 
 selenium_driver = get_selenium_driver()
 
@@ -47,16 +51,71 @@ with open(FN_LOG, 'a') as f:
 
         st = time()
         try:
-            _, soup = read_url(url, useSelenium=True, driver=selenium_driver)
+            # _, soup = read_url(url, useSelenium=True, driver=selenium_driver)
             printf(f'\tSelenium read in {time()-st:0.2f} secs.')
         except: 
             printf(f'\tSelenium failed to read ({time()-st:0.2f} secs). Skipping.')
             continue
 
         text = soup.find('div', class_='fullTextStr').text
-        mistakes, section_texts, section_wpms = mistakes_sections_from_soup(soup)
+        mistakes, section_texts, section_wpms = extract_mistakes_sections(soup)
 
-        printf('===== SECTIONS FROM TYPERACER =====')
+        tl = extract_typing_log(soup)
+        TL,C,W,_ = parse_typinglog(tl, text)
+
+        printf('===== MISTAKES: TYPERACER VS COMPUTED =====')
+
+        mistakes_ = W[W['Mistake']]['Word'].to_list()
+        mistakes_ = [m.rstrip() for m in mistakes_]
+        if (len(mistakes_) != len(mistakes)) or (not all([m_==m for m_,m in zip(mistakes_,mistakes)])):
+            printf(f'NO One or more mistakes ({len(mistakes)}) does not match')
+            printf('\t', ' '.join(mistakes))
+            printf('\t', ' '.join(mistakes_))
+        else:
+            printf(f'YE All mistakes ({len(mistakes)}) match')
+
+
+        printf('===== SECTION WPM: TYPERACER VS COMPUTED =====')
+        
+        word_ind = 0
+        for section,wpm in zip(section_texts, section_wpms): 
+            nwords = len(section.split(' '))
+            inds = range(word_ind, word_ind+nwords)
+
+            W_ = W.loc[inds]
+            C_ = C[C['WordInd'].apply(lambda i: i in inds)]
+
+            opts = ['all', 'no_spaces', 'no_endchar', 'no_endspace']
+            mindiff = np.inf
+            wpm_ = np.inf
+            for m in opts:
+                for t in opts:
+                    wpm__ = compute_wpm(C_, t,m)
+                    diff = abs(wpm - wpm__)
+                    if diff < mindiff:
+                        mindiff = diff
+                        wpm_ = wpm__
+                        opt_t, opt_m = t, m
+
+            wpm_ = compute_wpm(C_, 'no_spaces')
+
+            # section_ = ''.join(W_['Word'])[:-1]
+            section_ = ''.join(C_['Char'])[:-1]
+            if section_ != section:
+                printf('NO TypeRacer section text does not match words DataFrame')
+                printf('\t', section)
+                printf('\t', section_)
+
+            if wpm == wpm_:
+                printf('YE', end=' ')
+            else:
+                printf('NO', end=' ')
+            # printf(f'\t{wpm:0.2f}\t{wpm_:0.2f}')
+            printf(f'\t{wpm:0.2f}\t{wpm_:0.2f}\t{opt_t}\t{opt_m}')
+            word_ind += nwords
+
+
+        printf('===== SECTIONS: TYPERACER VS TEXT =====')
         if ' '.join(section_texts) == text:
             printf('YE Section text matches exactly')
         else:
@@ -69,7 +128,7 @@ with open(FN_LOG, 'a') as f:
                 printf('NO Section text does not match even after appending last cahracter')
 
 
-        printf('===== COMPUTED SECTIONS =====')
+        printf('===== SECTIONS: TYPERACER VS COMPUTED =====')
         section_texts_ = text_to_sections(text)
 
         # _ = [(print(s0), print(s1)) for s0,s1 in zip(section_texts, section_texts_)]

@@ -135,7 +135,7 @@ def extract_typing_log(soup:BeautifulSoup) -> str:
 # Function to load list of mistakes and sections (w/ WPMs)
 # ONLY IF SELENIUM USED TO LOAD HTML
 #   relies on typeracer to run internal javascript to compute these values
-def mistakes_sections_from_soup(soup:BeautifulSoup):
+def extract_mistakes_sections(soup:BeautifulSoup):
     # MISTAKES
     mistake_list = soup.select('table.WordsWithErrors ol.content div.replayWord')
     # if len(mistake_list) == 0:

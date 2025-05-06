@@ -326,3 +326,41 @@ def parse_typinglog_wordvals(tl:str):
 
     return text_inds, num_strokes
     
+
+# Takes the characters DataFrame (computed by parse_typinglog()) and computes WPM
+# Ideal for computing section WPM by inputting subsets the DataFrame
+# Allows for computing WPM without spaces, etc
+def compute_wpm(df:pd.DataFrame, text_opt=None, ms_opt=None) -> float:
+    # If only one option is given, use for both
+    if ms_opt is None:
+        ms_opt = text_opt
+
+    ms = df['Ms'].to_numpy().copy()
+    text_ = df['Char'].to_numpy().copy()
+
+    text = ''
+    if text_opt == 'no_spaces':
+        text = text_[text_ != ' ']
+    elif text_opt == 'no_endchar':
+        text = text_[:-1]
+    elif text_opt == 'no_endspace':
+        if text_[-1] == ' ':
+            text = text_[:-1]
+    else:
+        text = text_.copy()
+    T = len(text)
+
+    if ms_opt == 'no_spaces':
+        ms = ms[text_ != ' ']
+    elif ms_opt == 'no_endchar':
+        ms = ms[:-1]
+    elif ms_opt == 'no_endspace':
+        if text_[-1] == ' ':
+            ms = ms[:-1]
+    MS = ms.sum()
+
+    wpm = (T/5) / (MS/1e3/60)
+    return wpm
+
+
+
