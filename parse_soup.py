@@ -14,10 +14,11 @@
 #   DataFrame - for profile page (table of races)
 #   tuple - for pages corresponding to one single race or text
 
+from bs4.element import NavigableString, PageElement
 import numpy as np
 import pandas as pd
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from typeracer_utils import str_to_datetime
 
 ##
@@ -85,7 +86,9 @@ def extract_race_details(soup:BeautifulSoup) -> dict:
         col_val = cols[1].get_text(strip=True)
 
         if col_name == 'Racer':
-            race_details['user'] = cols[1].find('a')['href'][13:]
+            user_link = cols[1].find('a')['href']
+            user_str = '?user='
+            race_details['user'] = user_link[ user_link.find(user_str) + len(user_str) : ]
 
         elif col_name == 'Race Number':
             race_details['race'] = int(col_val)
@@ -180,9 +183,9 @@ def parse_text(soup:BeautifulSoup) -> dict:
     text_ = ' '.join([w for w in text_.split(' ') if w != ''])
     text_details['text'] = text_
 
-    text_details['title'] = text_info.find('a').text
-    text_details['type'] = text_parts[2][1:-1]
-    text_details['author'] = text_parts[3][3:]
+    text_details['title'] = text_info.find('a').text.strip()
+    text_details['type'] = text_parts[-3][1:-1]
+    text_details['author'] = text_parts[-2][3:]
 
     submitter_td = soup.find('td', string='Submitted by:')
     if submitter_td is not None:

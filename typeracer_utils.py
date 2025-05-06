@@ -27,7 +27,10 @@ def read_url(wp:str, htmlDict:dict=None,
     # TODO handle case where loaded HTML (in dict) was not loaded with selenium
     if htmlDict is not None:
         if wp in htmlDict:
-            return htmlDict[wp]
+            html = htmlDict[wp]
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            return html, soup
 
     # Define the two ways to read the URL
     #   This is done to facilitate multiple calls (in case of timeout)
@@ -99,14 +102,23 @@ def str_to_datetime(date_str:str):
     # Special case: Sept
     date_str = date_str.replace('Sept', 'Sep')
 
+    # if date_str.strip().lower() == "today":
+    #     return datetime.today().date()
+    # if '+' in date_str:
+    #     return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z').date()
+    # if '.' in date_str:
+    #     return datetime.strptime(date_str, '%b. %d, %Y').date()
+    # else:
+    #     return datetime.strptime(date_str, '%B %d, %Y').date()
+    
+    # 05 May 2025: Typeracer changed their date formats for some reason?
     if date_str.strip().lower() == "today":
         return datetime.today().date()
-    if '+' in date_str:
-        return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z').date()
-    if '.' in date_str:
-        return datetime.strptime(date_str, '%b. %d, %Y').date()
+    if ':' in date_str:
+        return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S').date()
     else:
-        return datetime.strptime(date_str, '%B %d, %Y').date()
+        return datetime.strptime(date_str, '%b %d, %Y').date()
+
 
 # Takes datetime (from DataFrame) and converts to date string for webpage
 #   This is done to retrieve races missing from DataFrame, i.e. races preceding the given date
