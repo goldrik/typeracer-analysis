@@ -220,6 +220,11 @@ def parse_race_self(soup:BeautifulSoup):
     # ONLY IF SELENIUM USED
     if False:
         mistakes, section_texts, section_wpms = mistakes_sections_from_soup(soup)
+        
+    # Verify players_wpms is monotonically decreasing, ignoring -1 values
+    wpms_ = [wpm for wpm in players_wpms if wpm != -1]
+    if not all(ths >= nxt for ths,nxt in zip(wpms_[:-1], wpms_[1:])):
+        raise Exception('Extracted player WPMs are not monotonically decreasing')
 
     return R['datetime'], textID, players_users, players_wpms, players_accs, players_tls
 
@@ -257,10 +262,10 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
             texts_dict['WPM'].append(T['wpm'])
             texts_dict['Accuracy'].append(T['accuracy'])
 
-    if len(textIDs):
-        texts_dict['NumWords'].append([len(text.split(' ')) for text in texts_dict['Text']])
-        texts_dict['NumChars'].append([len(text) for text in texts_dict['Text']])
+            texts_dict['NumWords'].append( len(T['text'].split(' ')) )
+            texts_dict['NumChars'].append( len(T['text']) )
 
+    if len(textIDs):
         texts_ = pd.DataFrame(texts_dict, index=textIDs)
         texts = pd.concat([texts, texts_])
 
@@ -300,6 +305,7 @@ else:
     
 
 if os.path.exists(FN_PKL_HTMLS):
+# if False:
     with open(FN_PKL_HTMLS, 'rb') as f:
         htmls = pickle.load(f)
 else:
@@ -309,8 +315,10 @@ else:
 #%%
 ## RACES
 # races = populate_races(races)
-# races = populate_races(races, 400)
-races = populate_races(races, 1)
+if races.empty:
+    races = populate_races(races, 400)
+else:
+    races = populate_races(races, 10)
 
 if not races.index.is_monotonic_decreasing:
     print('Warning: Races is not monotonic decreasing')
