@@ -219,7 +219,7 @@ def parse_race_self(soup:BeautifulSoup):
 
     # ONLY IF SELENIUM USED
     if False:
-        mistakes, section_texts, section_wpms = mistakes_sections_from_soup(soup)
+        mistakes, section_texts, section_wpms = extract_mistakes_sections(soup)
         
     # Verify players_wpms is monotonically decreasing, ignoring -1 values
     wpms_ = [wpm for wpm in players_wpms if wpm != -1]
@@ -352,47 +352,17 @@ with open(FN_PKL_HTMLS, 'wb') as f:
 
 
 #%%
+# RACES OF NOTE
 
+## TEXT
+# Text with numbers (years) and parentheses
+# ind = 7264
+# With double quotes
+# ind = 7498
+# iive vs live
+# ind = 7541
 
-# _,a = read_url(url_race.format(USER, 7506), useSelenium=True, driver=selenium_driver)
-# selenium HTTPConnectionPool(host='localhost', port=52298): Read timed out. (read timeout=120)
-
-
-#%%
-
-# 7502
-# Racer 	Aurik (goldrik)
-# Race Number 	7502
-# Date 	Wed, 23 Apr 2025 21:37:44 +0000
-# Speed 	125 WPM Try again?
-# Accuracy 	97.7%
-# Rank 	1st place (out of 5)
-# Opponents 	danisflying (4th place) saravanangct (3rd place) 
-
-#     few
-#     times.
-#     grow
-#     wisdom
-#     These
-#     tough
-#     hope
-#     primitive
-#     forever,
-#     might
-#     is
-	
-# Speed Throughout the Race123456780100200SegmentSpeed
-# Segment	WPM
-# Of course, there are those who learn after the first few times. 	150.588
-# They grow out of sports. And there are others who were born with the 	134.59
-# wisdom to know that nothing lasts. These are the truly tough among us, 	128.12
-# the ones who can live without illusion, or without even the hope of 	140.351
-# illusion. I am not that grown-up or up-to-date. I am a simpler 	114.338
-# creature, tied to more primitive patterns and cycles. I need to think 	112.858
-# something lasts forever, and it might as well be that state of being 	108.023
-# that is a game; it might as well be that, in a green field, in the sun	135.287
-
-
-# 7506
+## MISTAKES
 # No Mistakes
+# 7506
 
