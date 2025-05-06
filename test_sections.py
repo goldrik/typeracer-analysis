@@ -14,7 +14,7 @@ from time import time
 from bs4 import BeautifulSoup
 from typeracer_utils import read_url, get_selenium_driver
 from parse_soup import extract_num_races, extract_mistakes_sections, extract_typing_log
-from typing_analysis import text_to_sections, parse_typinglog, compute_wpm
+from typing_analysis import text_to_sections, parse_typinglog, compute_wpm_best
 
 from url_formatstrings import url_user, url_race
 
@@ -30,10 +30,10 @@ _, soup = read_url(url_user.format(user))
 n_races = extract_num_races(soup)
 
 inds = np.arange(1, n_races+1)
-races = np.random.choice(inds, 1, replace=False)
+races = np.random.choice(inds, 25, replace=False)
 
 # races = [7264]
-races = [5305]
+# races = [5305]
 
 selenium_driver = get_selenium_driver()
 
@@ -51,7 +51,7 @@ with open(FN_LOG, 'a') as f:
 
         st = time()
         try:
-            # _, soup = read_url(url, useSelenium=True, driver=selenium_driver)
+            _, soup = read_url(url, useSelenium=True, driver=selenium_driver)
             printf(f'\tSelenium read in {time()-st:0.2f} secs.')
         except: 
             printf(f'\tSelenium failed to read ({time()-st:0.2f} secs). Skipping.')
@@ -61,8 +61,13 @@ with open(FN_LOG, 'a') as f:
         mistakes, section_texts, section_wpms = extract_mistakes_sections(soup)
 
         tl = extract_typing_log(soup)
-        TL,C,W,_ = parse_typinglog(tl, text)
-
+        try:
+            TL,C,W,_ = parse_typinglog(tl, text)
+        except Exception as e:
+            printf('Error in parsing typingLog')
+            printf('\t', e)
+            continue
+        
         printf('===== MISTAKES: TYPERACER VS COMPUTED =====')
 
         mistakes_ = W[W['Mistake']]['Word'].to_list()
@@ -84,20 +89,8 @@ with open(FN_LOG, 'a') as f:
 
             W_ = W.loc[inds]
             C_ = C[C['WordInd'].apply(lambda i: i in inds)]
-
-            opts = ['all', 'no_spaces', 'no_endchar', 'no_endspace']
-            mindiff = np.inf
-            wpm_ = np.inf
-            for m in opts:
-                for t in opts:
-                    wpm__ = compute_wpm(C_, t,m)
-                    diff = abs(wpm - wpm__)
-                    if diff < mindiff:
-                        mindiff = diff
-                        wpm_ = wpm__
-                        opt_t, opt_m = t, m
-
-            wpm_ = compute_wpm(C_, 'no_spaces')
+            
+            wpm_, opt_t, opt_m = compute_wpm_best(C_, wpm)
 
             # section_ = ''.join(W_['Word'])[:-1]
             section_ = ''.join(C_['Char'])[:-1]

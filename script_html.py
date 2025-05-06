@@ -339,8 +339,49 @@ texts = populate_texts(texts, races)
 #%%
 ## UPDATE
 
-# Process typingLog
+# Create dataframe which contains the three typingLog dataframes for each race
 
+# Process typingLog
+for race in races.index:
+    textID = races.loc[race, 'TextID']
+
+    tl = races.loc[race, 'TypingLog']
+    text = texts.loc[textID, 'Text']
+
+    wpm = races.loc[race, 'WPM']
+    acc = races.loc[race, 'Accuracy']
+
+    TL,C,W,_ = parse_typinglog(tl, text)
+
+    wpm_, opt_t, opt_m = compute_wpm_best(C, wpm)
+    if np.abs(wpm_-wpm) < 0.01:
+        ye = '=='
+    else:
+        ye = 'x'
+    print(f'{race}\t{wpm:0.2f}\t{wpm_:0.2f}\t{ye}\t{opt_t:<12}\t{opt_m}')
+
+#%%
+## UPDATE
+
+# Process typingLog
+for race in races.index:
+    textID = races.loc[race, 'TextID']
+
+    tl = races.loc[race, 'TypingLog']
+    text = texts.loc[textID, 'Text']
+
+    wpm = races.loc[race, 'WPM']
+    acc = races.loc[race, 'Accuracy']
+
+    TL,C,W,_ = parse_typinglog(tl, text)
+
+    acc_, opt_t, opt_m = compute_acc_best(C, acc)
+    if np.abs(acc_-acc) < 0.01:
+        ye = '=='
+    else:
+        ye = 'x'
+    print(f'{race}\t{acc:0.2f}\t{acc_:0.2f}\t{ye}\t{opt_t:<12}\t{opt_m}')
+    
 
 #%%
 ## SAVE

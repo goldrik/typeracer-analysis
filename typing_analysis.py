@@ -330,15 +330,16 @@ def parse_typinglog_wordvals(tl:str):
 # Takes the characters DataFrame (computed by parse_typinglog()) and computes WPM
 # Ideal for computing section WPM by inputting subsets the DataFrame
 # Allows for computing WPM without spaces, etc
-def compute_wpm(df:pd.DataFrame, text_opt=None, ms_opt=None) -> float:
+def compute_wpm_acc(df:pd.DataFrame, text_opt=None, ms_opt=None) -> float:
     # If only one option is given, use for both
     if ms_opt is None:
         ms_opt = text_opt
 
     ms = df['Ms'].to_numpy().copy()
+    mistakes = df['Mistake'].to_numpy().copy()
     text_ = df['Char'].to_numpy().copy()
 
-    text = ''
+    text = text_
     if text_opt == 'no_spaces':
         text = text_[text_ != ' ']
     elif text_opt == 'no_endchar':
@@ -346,21 +347,58 @@ def compute_wpm(df:pd.DataFrame, text_opt=None, ms_opt=None) -> float:
     elif text_opt == 'no_endspace':
         if text_[-1] == ' ':
             text = text_[:-1]
-    else:
-        text = text_.copy()
     T = len(text)
 
     if ms_opt == 'no_spaces':
         ms = ms[text_ != ' ']
+        mistakes = mistakes[text_ != ' ']
     elif ms_opt == 'no_endchar':
         ms = ms[:-1]
+        mistakes = mistakes[:-1]
     elif ms_opt == 'no_endspace':
         if text_[-1] == ' ':
             ms = ms[:-1]
+            mistakes = mistakes[:-1]
     MS = ms.sum()
+    nc = np.count_nonzero(~mistakes)
 
     wpm = (T/5) / (MS/1e3/60)
-    return wpm
+    acc = (nc / T) * 100
+    return wpm, acc
 
 
+# FOR TESTING PURPOSES
+# Loop through all ways to compute WPM (purportedly)
+# Return the wpm with minimum error and its options
+def compute_wpm_best(df, wpm_tp):
+    opts = ['all', 'no_spaces', 'no_endchar', 'no_endspace']
 
+    min_diff = np.inf
+    wpm = np.inf
+    opt_t, opt_m = 'all', 'all'
+    for m in opts:
+        for t in opts:
+            wpm_ = compute_wpm_acc(df, t,m)[0]
+            wpm_diff = abs(wpm_tp - wpm_)
+            if wpm_diff < min_diff:
+                min_diff = wpm_diff
+                wpm = wpm_
+                opt_t, opt_m = t, m
+
+    return wpm, opt_t, opt_m
+def compute_acc_best(df, acc_tp):
+    opts = ['all', 'no_spaces', 'no_endchar', 'no_endspace']
+
+    min_diff = np.inf
+    acc = np.inf
+    opt_t, opt_m = 'all', 'all'
+    for m in opts:
+        for t in opts:
+            acc_ = compute_wpm_acc(df, t,m)[1]
+            acc_diff = abs(acc_tp - acc_)
+            if acc_diff < min_diff:
+                min_diff = acc_diff
+                acc = acc_
+                opt_t, opt_m = t, m
+
+    return acc, opt_t, opt_m
