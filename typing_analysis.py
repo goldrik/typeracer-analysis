@@ -92,6 +92,7 @@ def parse_typinglog(tl, text):
 
     text_ = ''
     word_ = []
+    wordprev_ = []
     word_ind = 0
     char_ind = 0
     char_ms, mistake, first_typed_char = reset_word_vars()
@@ -100,8 +101,13 @@ def parse_typinglog(tl, text):
         char_ind_ = TL.iloc[i]['CharInd']
         op = TL.iloc[i]['Op']
 
+        # print(words[word_ind])
+        # print(word_)
+        # print(char_ind_)
+
         if op == '+':
-            word_.append(c)
+            # word_.append(c)
+            word_.insert(char_ind_, c)
             assert(word_[char_ind_] == c)
 
         elif op == '-':
@@ -115,40 +121,90 @@ def parse_typinglog(tl, text):
         # Accumulate the time needed to type this character
         char_ms += TL.iloc[i]['Ms']
 
+        # if i > 100:
+        #     print(word_)
+        #     print(words[word_ind][:len(word_)])
+        # if i > 190:
+            # raise Exception
+
         # For each character in the word, use the word's substring (so far)
         #   check if the user has typed the substring correctly yet
-        substring = words[word_ind][:char_ind+1]
-        if ''.join(word_) == substring:
+        # substring = words[word_ind][:char_ind+1]
+        substring = words[word_ind][:len(word_)]
+        # MUST check for end of keystroke
+        #   sometimes the substring my inadvertently match during a keystroke (of deletions)
+        keystrokeEnd = (i == num_entries-1) or (TL.index[i] != TL.index[i+1])
+        notDelete = op != '-'
+        # if (''.join(word_) == substring) and (keystrokeEnd or notDelete):
+        if len(word_) > len(wordprev_) and (''.join(word_) == substring) and (keystrokeEnd or TL.iloc[i+1]['Op'] != '-'):
+        # if (''.join(word_) == substring) and (len(word_) == char_ind+1) and (keystrokeEnd or notDelete):
+        # if ''.join(word_) == substring and keystrokeEnd:
+        # if ''.join(word_) == substring and len(word_) == char_ind+1:
+            # print(TL.iloc[i])
+            # d = lambda w: f"{'-' + w + '-':<12}"
+            # print(d(c), d(''.join(word_)), '\t', d(substring), '\t', char_ind, '\t', op)
+            # if len(word_) != char_ind+1:
+                # raise Exception('checkpoint')
+            for wp_ in range(len(wordprev_)):
+                assert(word_[wp_] == wordprev_[wp_])
+            c_ = ''.join(word_[len(wordprev_):])
+            wordprev_ = word_.copy()
             # The correct character
-            c_ = words[word_ind][char_ind]
-            chars_text.append(c_)
-            word_inds.append(word_ind)
+            # c_ = words[word_ind][char_ind]
+            if (len(c_) != 1):
+                # raise Exception('char to add is not a single character')
+                print(f'\tchar to add {c_} is not a single character')
+            elif (c_ != words[word_ind][char_ind]):
+                raise Exception('char to add is different from usual')
+            C_ = len(c_)
+            for i_ in range(C_):
+                chars_text.append(c_[i_])
+                word_inds.append(word_ind)
+                
+                if i_ == 0:
+                    chars_ms.append(char_ms)
+                else:
+                    chars_ms.append(0)
+                mistakes.append(mistake)
+                if not mistake: 
+                    # Normally, the correct character was typed
+                    chars_typed.append(c_)
+                else:
+                    chars_typed.append(first_typed_char)
 
-            chars_ms.append(char_ms)
-            mistakes.append(mistake)
-            if not mistake: 
-                # Normally, the correct character was typed
-                chars_typed.append(c_)
-            else:
-                chars_typed.append(first_typed_char)
-
-            char_ind += 1
+                char_ind += 1
             char_ms, mistake, first_typed_char = reset_word_vars()
+
+            # If we've reached the end of the text or end of word
+            if len(word_):
+                if ''.join(word_) == words[word_ind]:
+                # if (i == num_entries-1) or \
+                    # ((c == ' ') and (TL.iloc[i+1]['CharInd'] == 0) and (TL.iloc[i+1]['Op'] == '+')):
+                    text_ += ''.join(word_)
+                    word_ = []
+                    wordprev_ = []
+
+                    word_ind += 1
+                    char_ind = 0
+                    char_ms, mistake, first_typed_char = reset_word_vars()
         else:
             mistake = True
             # Set this variable for just the first character
             if first_typed_char == '':
                 first_typed_char = c
 
-        # If we've reached the end of the text or end of word
-        if (i == num_entries-1) or \
-            ((c == ' ') and (TL.iloc[i+1]['CharInd'] == 0) and (TL.iloc[i+1]['Op'] == '+')):
-            text_ += ''.join(word_)
-            word_ = []
+        # # If we've reached the end of the text or end of word
+        # if len(word_):
+        #     if ''.join(word_) == words[word_ind]:
+        #     # if (i == num_entries-1) or \
+        #         # ((c == ' ') and (TL.iloc[i+1]['CharInd'] == 0) and (TL.iloc[i+1]['Op'] == '+')):
+        #         text_ += ''.join(word_)
+        #         word_ = []
+        #         wordprev_ = []
 
-            word_ind += 1
-            char_ind = 0
-            char_ms, mistake, first_typed_char = reset_word_vars()
+        #         word_ind += 1
+        #         char_ind = 0
+        #         char_ms, mistake, first_typed_char = reset_word_vars()
 
     C = pd.DataFrame({'WordInd':word_inds, 'Char':chars_text, 'Ms':chars_ms, 'Mistake':mistakes, 'Typed':chars_typed})
 
@@ -239,10 +295,24 @@ def parse_typinglog_complete(tl:str):
             i += len(entries) != 0
             assert(len(entries) > 0)
 
-            for char_ind, op, char in entries:
+            for char_ind_, op, char in entries:
+                char_ind = int(char_ind_)
+                # ! Sometimes TypeRacer saves consecutive +'s as one "keystroke"
+                # Rarely, these two adds are from different words
+                #   but the second character (from second word) gets added to the previous word
+                # (Without the original text) This can only be detected when you get to the second word
+                #   Here, the new character should get character index 0
+                #   If it's not 0, then the glitch occurred
+                if len(ops) > 1:
+                    if op == '+' and ops[-1] == '+' and char_inds[-1] > char_ind and char_ind != 0:
+                        # print('fix')
+                        for inds_fix in range(char_ind,0,-1):
+                            char_inds[-inds_fix] = char_ind-inds_fix
+                            word_inds[-inds_fix] = w
+                
                 times.append(ms)
 
-                char_inds.append(int(char_ind))
+                char_inds.append(char_ind)
                 ops.append(op)
                 
                 # The "character" found with regex can be \" (two characters), so take the last index
@@ -253,6 +323,27 @@ def parse_typinglog_complete(tl:str):
 
                 # Only save the ms once (to avoid double-dipping)
                 ms = 0
+
+    if True:
+        # ! Special case:
+        #   Glitch where keystroke encompasses addition of whole word
+        #   * Right now, only detecting this is if word is comprised of all additions (no mistakes)
+        checkWord = False
+        ind = 0
+        for i in range(len(char_inds)-1):
+            if chars[i] == ' ':
+                if checkWord and i-ind>0:
+                    if all([pd_inds[i_] == pd_inds[ind] for i_ in range(ind,i+1)]):
+                        char_inds[ind:i+1] = range(i+1-ind)
+                        word_inds[ind:] = [w+1 for w in word_inds[ind:]]
+                checkWord = char_inds[i+1] != 0 and ops[i] == '+'
+                ind = i+1
+            if not checkWord:
+                continue
+            if ops[i] != '+':
+                checkWord = False
+                continue
+
 
     TL = pd.DataFrame({'WordInd':word_inds, 'CharInd':char_inds, 'Char':chars, 'Ms':times, 'Op':ops}, index=pd_inds)
     return TL
