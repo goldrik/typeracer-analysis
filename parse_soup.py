@@ -14,11 +14,10 @@
 #   DataFrame - for profile page (table of races)
 #   tuple - for pages corresponding to one single race or text
 
-from bs4.element import NavigableString, PageElement
 import numpy as np
 import pandas as pd
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from typeracer_utils import str_to_datetime
 
 ##
