@@ -165,6 +165,14 @@ def parse_text(soup:BeautifulSoup) -> dict:
     text_details = {}
 
     # text_regex = r'\((\w+)\) *by (\w.*\w)\s*'
+    textID_str = 'text_info%3Fid%3D'
+
+    # Get TextID
+    # ! Not the most robust way to get this
+    # * This is only needed to address the special case texts (see below)
+    button_link_with_textid = soup.find('a', class_="change-theme-button")['href']
+    ind = button_link_with_textid.find(textID_str) + len(textID_str)
+    textID = int(button_link_with_textid[ind:])
     
     text_div = soup.find('div', class_='fullTextStr')
     text_info = text_div.find_next_siblings()[0]
@@ -180,6 +188,20 @@ def parse_text(soup:BeautifulSoup) -> dict:
     # Eliminate these (and any other possible multi-spaces)
     text_ = text_div.text
     text_ = text_.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    # ! SPECIAL CASES: Discrepancy between official text (in text_info webpage) and typingLog (shown to user)
+    if textID == 5390240:
+        text_ = text_.replace('judgments', 'judgements')
+    # ! SPECIAL CASE: TextID 4180296
+    elif textID == 4180296:
+        text_ = 'Imagine if you got what you want every time. ' \
+            'No struggle, no hard work, no challenges, no hard work required. ' \
+            'Some of you saying that would be great. ' \
+            'You would be weak and then when something hard comes up in your life ' \
+            'you wouldn\'t know how to handle it because you have never gone through anything that strengthens you. ' \
+            'You cannot grow without struggle, you cannot develop strength without resistance, ' \
+            'without challenging yourself, without struggle. Pain is your friend, ' \
+            'maybe not in the moment, but for the evolution of your soul, for the long term benefit of you, ' \
+            'as a stronger human being.'
     text_ = ' '.join([w for w in text_.split(' ') if w != ''])
     text_details['text'] = text_
 
