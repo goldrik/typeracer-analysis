@@ -164,13 +164,14 @@ def parse_text(soup:BeautifulSoup) -> dict:
     text_details = {}
 
     # text_regex = r'\((\w+)\) *by (\w.*\w)\s*'
-    textID_str = 'text_info%3Fid%3D'
 
     # Get TextID
     # ! Not the most robust way to get this
+    textID_str = 'text_info%3Fid%3D'
     # * This is only needed to address the special case texts (see below)
+    # * Must be done this way because the "typed" text can't be retrieved without running JavaScript
     button_link_with_textid = soup.find('a', class_="change-theme-button")['href']
-    ind = button_link_with_textid.find(textID_str) + len(textID_str)
+    ind = button_link_with_textid.rfind(textID_str) + len(textID_str)
     textID = int(button_link_with_textid[ind:])
     
     text_div = soup.find('div', class_='fullTextStr')
@@ -190,7 +191,6 @@ def parse_text(soup:BeautifulSoup) -> dict:
     # ! SPECIAL CASES: Discrepancy between official text (in text_info webpage) and typingLog (shown to user)
     if textID == 5390240:
         text_ = text_.replace('judgments', 'judgements')
-    # ! SPECIAL CASE: TextID 4180296
     elif textID == 4180296:
         text_ = 'Imagine if you got what you want every time. ' \
             'No struggle, no hard work, no challenges, no hard work required. ' \
@@ -201,6 +201,29 @@ def parse_text(soup:BeautifulSoup) -> dict:
             'without challenging yourself, without struggle. Pain is your friend, ' \
             'maybe not in the moment, but for the evolution of your soul, for the long term benefit of you, ' \
             'as a stronger human being.'
+    elif textID == 4350520:
+        text_ = text_.replace('find it and rebuild', 'find and rebuild')
+    elif textID == 3622307:
+        text_ = text_.replace('shield and all', 'shield all')
+    elif textID == 3100061:
+        text_ = text_.replace('"she".', '"she."')
+    elif textID == 3550801:
+        text_ = text_.replace('a cappella', 'acapella')
+    elif textID == 3640341:
+        text_ = text_.replace('San Francisco,', 'San Francisco')
+    elif textID == 3622285:
+        text_ = text_.replace('Willy', 'Willie')
+        text_ = text_.replace('the young actor,', 'the young actor')
+    elif textID == 3810373:
+        text_ = text_.replace('whom', 'who')
+    elif textID == 3811416:
+        text_ = text_.replace('feelings', 'feeling')
+    elif textID == 3550340:
+        text_ = text_.replace('how\'d we', 'how we\'d')
+    elif textID == -9:
+        text_ = text_.replace('whom', 'who')
+    elif textID == -9:
+        text_ = text_.replace('whom', 'who')
     text_ = ' '.join([w for w in text_.split(' ') if w != ''])
     text_details['text'] = text_
 
