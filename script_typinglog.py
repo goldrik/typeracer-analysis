@@ -1,41 +1,50 @@
-# You should have run script_html already
-
-import re
+# Aurik Sarker
+# 30 April 2025
 
 #%%
+#!%load_ext autoreload
+#!%autoreload 2
+
+import numpy as np
+import pandas as pd
+
+from bs4 import BeautifulSoup
+
+import os
+import dotenv
+import pickle
+from time import time, sleep
+
+from parse_soup import *
+from typeracer_utils import *
+# from typing_analysis import *
+from typing_analysis_ import *
 
 
-# def tl_df_to_text(TL):
-#     T = len(TL)
-#     t = ''
-#     word = []
-#     for i in range(T):
-#         c = TL.iloc[i]['char']
-#         word_ind = TL.iloc[i]['ind']
-#         op = TL.iloc[i]['op']
+#%%
+## ENV VARS
+dotenv.load_dotenv()
+USER: str = os.getenv('USER')
+FH_PKL: str = os.getenv('FH_PKL')
 
-#         if op == '+':
-#             word.append(c)
-#             assert(word[word_ind] == c)
+FN_PKL_USER = os.path.join(FH_PKL, f'typeracer_{USER}.pkl')
+FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
 
-#         elif op == '-':
-#             assert(word[word_ind] == c)
-#             word.pop(word_ind)
+try: 
+    races
+except:
+    with open(FN_PKL_USER, 'rb') as f:
+        races, racers, typedata, texts = pickle.load(f)
+    with open(FN_PKL_HTMLS, 'rb') as f:
+        htmls = pickle.load(f)
 
-#         elif op == '$':
-#             word[word_ind] = c
-#             assert(word[word_ind] == c)
 
-#         if (i == T-1) or ((c == ' ') and (TL.iloc[i+1]['ind'] == 0) and (TL.iloc[i+1]['op'] == '+')):
-#             t += ''.join(word)
-#             word = []
-
-#     return t
-
+#%%
 
 def print_tl_df(TL):
    [print(f'{a}\t{b}\t{c}\t{d}') for a,b,c,d in 
         zip(TL['CharInd'], TL['Op'], TL['Char'], TL['Ms'])]
+
 
 #%%
 # Text with numbers (years) and parentheses
@@ -63,17 +72,81 @@ ind = 2776
 
 ind = 2753
 
+ind = 2742
+
+ind = 2732
+
+
 #%%
 
 inds = races.index
-inds = range(2800, 0, -1)
+# inds = range(2163-1, 0, -1)
+# inds = range(races.index.max(), 2742, -1)
+# inds = np.random.choice(races.index, 300, replace=False)
+# inds = [ind]
+# inds = [7548]
+
+for race in inds:
+    print(race)
+
+    textID = races.loc[race, 'TextID']
+
+    tl = races.loc[race, 'TypingLog']
+    text = texts.loc[textID, 'Text']
+    wpm = races.loc[race, 'WPM']
+    acc = races.loc[race, 'Accuracy']
+
+    # chars_total = texts.loc[textID, 'NumChars']
+    # words_total = texts.loc[textID, 'NumWords']
+
+    ####################
+
+    assert(tl.count('|') == 1)
+    assert(tl[typinglog_pipe(tl)+1] == '0')
+
+    ####################
+
+    TL0 = parse_typinglog_simple(tl)
+    # assert(''.join(TL0['Char']) == text)
+    # if ''.join(TL0['Char']) != text:
+    #     print(textID)
+    #     print(text)
+    #     print(''.join(TL0['Char']))
+    #     continue
+
+    ####################
+
+    TL = parse_typinglog_complete(tl)[0]
+
+    lc, fo = [], []
+    for _,W in TL.groupby('Window'):
+        lc.append(W.iloc[-1]['Char'])
+        fo.append(W.iloc[0]['Op'])
+    lc = np.array(lc)
+    fo = np.array(fo)
+
+    # if ~np.all(lc[:-1] == ' '):
+    #     print('\tThere was a window that didnt end with space')
+    if ~np.all(fo == '+'):
+        print('\tThere was a window that didnt start with an addition')
+
+    text_ = reconstruct_text_typinglog(TL)
+    assert(text_ == text)
+
+
+#%%
+
+raise Exception
+
+inds = races.index
+# inds = range(2800, 0, -1)
 # inds = np.random.choice(races.index, 300, replace=False)
 # inds = [ind]
 # inds = [7538]
 
 for race in inds:
-    if race in [2751, 2742]:
-        continue
+    # if race in [2751, 2742]:
+    #     continue
     print(race)
 
     textID = races.loc[race, 'TextID']
