@@ -360,7 +360,6 @@ def reconstruct_text_typinglog(TL):
 
     for _,W in TL.groupby('Window'):
         window = []
-        word_ind_offset = 0
         for i,w in enumerate(W.itertuples()):
             c = w.Char
             word_ind = w.WindowInd
@@ -372,121 +371,26 @@ def reconstruct_text_typinglog(TL):
                 t_ = t[spaceInd+1:]
                 t = t[:spaceInd+1]
                 window = window + list(t_)
-            
-            word_ind = word_ind + word_ind_offset
-
-            if len(window) < word_ind:
-                window += [''] * (word_ind - len(window))
 
             if op == '+':
                 window.insert(word_ind, c)
-                # assert(window[word_ind] == c)
+                assert(window[word_ind] == c)
 
             elif op == '-':
-                # assert(window[word_ind] == c)
+                assert(window[word_ind] == c)
                 window.pop(word_ind)
 
             elif op == '$':
                 window[word_ind] = c
-                # assert(window[word_ind] == c)
+                assert(window[word_ind] == c)
         
-
-        # if len(t) and t[-1] != ' ':
-        #     for w in range(1, len(window)+1):
-        #         window_ = ''.join(window[:w])
-        #         if len(t) > w:
-        #             t_ = t[-w:]
-        #         else:
-        #             break
-        #         if window_ == t_:
-        #             t = t[:-w]
-        #             break
         t += ''.join(window)
 
     # Check if there was a duplicate punctuation at the end of the text (TypeRacer bug, or input lag perhaps)
     # The duplicate characters should be from the same keystroke (probably)
-    if t[-1] == t[-2]:
-        if TL.iloc[-1]['Stroke'] == TL.iloc[-2]['Stroke']:
-            # Ignore the ellipses case
-            if t[-3:] != '...':
-                t = t[:-1]
-
-    return t
-
-
-def reconstruct_text_typinglog__(TL):
-    t = ''
-    # T = len(TL)
-
-    for _,W in TL.groupby('Window'):
-        window = []
-        for i,w in enumerate(W.itertuples()):
-            c = w.Char
-            word_ind = w.WindowInd
-            op = w.Op
-
-            if i == 0 and op != '+':
-                # Probably trying to delete a character from the previous word
-                # Make sure the characters match of course
-                if t[-1] == c and op == '-':
-                    t = t[:-1]
-                continue
-
-            if len(window) < word_ind:
-                window += [''] * (word_ind - len(window))
-
-            if op == '+':
-                window.insert(word_ind, c)
-                # assert(window[word_ind] == c)
-
-            elif op == '-':
-                # assert(window[word_ind] == c)
-                window.pop(word_ind)
-
-            elif op == '$':
-                window[word_ind] = c
-                # assert(window[word_ind] == c)
-        
-
-        if len(t) and t[-1] != ' ':
-            for w in range(1, len(window)+1):
-                window_ = ''.join(window[:w])
-                if len(t) > w:
-                    t_ = t[-w:]
-                else:
-                    break
-                if window_ == t_:
-                    t = t[:-w]
-                    break
-        t += ''.join(window)
-
-    return t
-
-
-def reconstruct_text_typinglog_(TL):
-    T = len(TL)
-    t = ''
-    word = []
-    for i in range(T):
-        c = TL.iloc[i]['Char']
-        word_ind = TL.iloc[i]['CharInd']
-        op = TL.iloc[i]['Op']
-
-        if op == '+':
-            word.append(c)
-            assert(word[word_ind] == c)
-
-        elif op == '-':
-            assert(word[word_ind] == c)
-            word.pop(word_ind)
-
-        elif op == '$':
-            word[word_ind] = c
-            assert(word[word_ind] == c)
-
-        if (i == T-1) or ((c == ' ') and (TL.iloc[i+1]['CharInd'] == 0) and (TL.iloc[i+1]['Op'] == '+')):
-            t += ''.join(word)
-            word = []
+    # Ignore the ellipses case
+    if t[-1] == t[-2] and TL.iloc[-1]['Stroke'] == TL.iloc[-2]['Stroke'] and t[-3:] != '...':
+        t = t[:-1]
 
     return t
 
