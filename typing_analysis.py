@@ -14,7 +14,8 @@ import re
 ##
 # TEXT
 
-# Determine the sections
+# Divide text into roughtly equal-length sections
+# This may not match the sections identified by TypeRacer (found on each race webpage)
 def text_to_sections(text: str, numSections: int=8) -> list[str]:
     section_len_chars = len(text) / numSections
     # Exact characters where the text may be divided into sections
@@ -49,6 +50,7 @@ def text_to_sections(text: str, numSections: int=8) -> list[str]:
 
     return sections
 
+
 ##
 # TYPINGLOG
 
@@ -64,19 +66,28 @@ def typinglog_pipe(tl: str) -> int:
 
 
 # Outputs three dataframes: all keystrokes, text characters, words
-def parse_typinglog(tl, text):
+def parse_typinglog(tl):
     # This gives us all the keystrokes/entries first
-    TL = parse_typinglog_complete(tl)
-    num_entries = len(TL)
+    TL = parse_typinglog_complete(tl)[0]
 
-    words=  text.split(' ')
-    words[:-1] = [w+' ' for w in words[:-1]]
+    TL_ = TL.copy()
+    TL_ = split_typinglog_addition_entries(TL_)
+
+    text, partials = reconstruct_text_typinglog(TL_)
+
+    # TypingLog DataFrame arrays
+    # Save as numpy arrays instead for MUCH faster iteration
+    tl_window_inds = TL_['WindowInd'].to_numpy()
+    tl_chars = TL_['Char'].to_numpy()
+    tl_ops = TL_['Op'].to_numpy()
+    tl_ms = TL_['Ms'].to_numpy()
+    tl_strokes = TL_['Stroke'].to_numpy()
+
 
     ## CHARACTERS
 
     # For each character in the text
     chars_text = []
-    word_inds = []
     # Time it took to type each character CORRECTLY
     # i.e. includes time for incorrect keystrokes
     chars_ms = []
@@ -85,273 +96,378 @@ def parse_typinglog(tl, text):
     # Which character did the user type
     chars_typed = []
 
-    def reset_word_vars():
-        # char_ms, mistake, first_typed_char
-        return 0, False, ''
+    # When a character is typed correctly, reset the variables
+    def reset_vars(): return 0, False, ''
+
+    window_ind_max = np.max(tl_window_inds)
+    # Keep track of how much text has been typed correctly
+    text_ind = 0
+    # Keep track of keystrokes needed for each correct character typed
+    keystrokes = []
+    # Loop through each keystroke
+    for s,partial in enumerate(partials):
+        lenPartial = len(partial)
+        # *After* each stroke, check if the next portion of the text has been typed
+        #   NOTE: Make sure the new text is longer than previous 
+        #         (keystrokes may include deletions of correct characters)
+
+        # Track the keystrokes required
+        keystrokes.append(s)
+        if lenPartial > text_ind and partial == text[:lenPartial]:
+            # New *correct* characters that have been typed
+            new_chars = text[text_ind:lenPartial]
+            text_ind = lenPartial
+
+            # Keystrokes required -> all typed entries (additions, deletions, etc)
+            keystrokes = np.array(keystrokes)
+            inds_strokes = np.isin(tl_strokes, keystrokes)
+            num_entries = np.count_nonzero(inds_strokes)
+            # S = TL_[inds_strokes]
 
 
-    text_ = ''
-    word_ = []
-    wordprev_ = []
-    word_ind = 0
-    char_ind = 0
-    char_ms, mistake, first_typed_char = reset_word_vars()
-    for i in range(num_entries):
-        c = TL.iloc[i]['Char']
-        char_ind_ = TL.iloc[i]['CharInd']
-        op = TL.iloc[i]['Op']
+            # Given all the keystrokes needed to type the new characters
+            # Iterate through the individual entries to see when each character got typed correctly
+            #   This handles cases where multiple new characters were typed at once
 
-        # print(words[word_ind])
-        # print(word_)
-        # print(char_ind_)
+            # Simulate TypeRacer window for just these keystrokes
+            #   Extra indices provided since keystrokes dont necessarily start from index 0
+            window = [''] * window_ind_max
 
-        if op == '+':
-            # word_.append(c)
-            word_.insert(char_ind_, c)
-            assert(word_[char_ind_] == c)
+            # Keep track of when the previous character was typed correctly
+            entry_ind = -1
+            new_chars_ = new_chars
+            char_ms, mistake, char_typed = reset_vars()
+            nc = 1
+            for i,(ind, c, op, ms) in enumerate(zip( \
+                    tl_window_inds[inds_strokes], tl_chars[inds_strokes], tl_ops[inds_strokes], tl_ms[inds_strokes]) ):
+                # BY DEFINITION, the last new character was typed at the end of the keystrokes
+                #   This is given by the way we defined this loop (partials)
+                # if len(new_chars_) == 1:
+                if nc == len(new_chars):
+                    break
+                # If last entry, let the for loop (below) handle it
+                if i == num_entries-1:
+                    break
 
-        elif op == '-':
-            assert(word_[char_ind_] == c)
-            word_.pop(char_ind_)
+                # Track the amount of time
+                char_ms += ms
+                # Character typed
+                if char_typed == '':
+                    char_typed = c
 
-        elif op == '$':
-            word_[char_ind_] = c
-            assert(word_[char_ind_] == c)
+                # Update window with new entry
+                if op == '+':
+                    window.insert(ind, c)
+                elif op == '-':
+                    window.pop(ind)
+                elif op == '$':
+                    window[ind] = c
 
-        # Accumulate the time needed to type this character
-        char_ms += TL.iloc[i]['Ms']
+                window_text = ''.join(window)
+                # Check if the latest typed character matches
+                # if len(window_text) == (len(new_chars)-len(new_chars_)+1) and window_text[-1] == new_chars_[0]:
+                if window_text == new_chars[:nc]:
+                    # Do not count the entry if it's a deletion (unless at end of keystroke)
+                    # if op != '-' or S['Stroke'].iloc[i+1] != S['Stroke'].iloc[i]:
+                    if op != '-' or tl_strokes[inds_strokes][i+1] != tl_strokes[inds_strokes][i]:
+                        entry_ind = i
+                        
+                        # chars_text.append(new_chars_[0])
+                        # new_chars_ = new_chars_[1:]
+                        chars_text.append(new_chars[nc-1])
+                        nc += 1
 
-        # if i > 100:
-        #     print(word_)
-        #     print(words[word_ind][:len(word_)])
-        # if i > 190:
-            # raise Exception
+                        chars_ms.append(char_ms)
+                        mistakes.append(mistake)
+                        chars_typed.append(char_typed)
 
-        # For each character in the word, use the word's substring (so far)
-        #   check if the user has typed the substring correctly yet
-        # substring = words[word_ind][:char_ind+1]
-        substring = words[word_ind][:len(word_)]
-        # MUST check for end of keystroke
-        #   sometimes the substring my inadvertently match during a keystroke (of deletions)
-        keystrokeEnd = (i == num_entries-1) or (TL.index[i] != TL.index[i+1])
-        notDelete = op != '-'
-        # if (''.join(word_) == substring) and (keystrokeEnd or notDelete):
-        if len(word_) > len(wordprev_) and (''.join(word_) == substring) and (keystrokeEnd or TL.iloc[i+1]['Op'] != '-'):
-        # if (''.join(word_) == substring) and (len(word_) == char_ind+1) and (keystrokeEnd or notDelete):
-        # if ''.join(word_) == substring and keystrokeEnd:
-        # if ''.join(word_) == substring and len(word_) == char_ind+1:
-            # print(TL.iloc[i])
-            # d = lambda w: f"{'-' + w + '-':<12}"
-            # print(d(c), d(''.join(word_)), '\t', d(substring), '\t', char_ind, '\t', op)
-            # if len(word_) != char_ind+1:
-                # raise Exception('checkpoint')
-            for wp_ in range(len(wordprev_)):
-                assert(word_[wp_] == wordprev_[wp_])
-            c_ = ''.join(word_[len(wordprev_):])
-            wordprev_ = word_.copy()
-            # The correct character
-            # c_ = words[word_ind][char_ind]
-            if (len(c_) != 1):
-                # raise Exception('char to add is not a single character')
-                print(f'\tchar to add {c_} is not a single character')
-            elif (c_ != words[word_ind][char_ind]):
-                raise Exception('char to add is different from usual')
-            C_ = len(c_)
-            for i_ in range(C_):
-                chars_text.append(c_[i_])
-                word_inds.append(word_ind)
-                
-                if i_ == 0:
-                    chars_ms.append(char_ms)
+                        char_ms, mistake, char_typed = reset_vars()
+
                 else:
-                    chars_ms.append(0)
+                    # If the first entry did not match, then mark a mistake occurred
+                    mistake = True
+
+            # The rest of the chars
+            new_chars_ = new_chars[nc-1:]
+            nc = len(new_chars_)
+            # If the number of new characters matches the number of entries, no mistake
+            mistake = nc != np.count_nonzero(inds_strokes)-(entry_ind+1)
+            ms = np.sum(tl_ms[inds_strokes][entry_ind+1:])
+            for c in new_chars_:
+                chars_text.append(c)
+                chars_ms.append(ms)
+                # chars_ms.append(ms / nc)
                 mistakes.append(mistake)
-                if not mistake: 
-                    # Normally, the correct character was typed
-                    chars_typed.append(c_)
+                if mistake:
+                    chars_typed.append(tl_chars[inds_strokes][entry_ind+1])
                 else:
-                    chars_typed.append(first_typed_char)
+                    chars_typed.append(c)
 
-                char_ind += 1
-            char_ms, mistake, first_typed_char = reset_word_vars()
+                ms = 0
 
-            # If we've reached the end of the text or end of word
-            if len(word_):
-                if ''.join(word_) == words[word_ind]:
-                # if (i == num_entries-1) or \
-                    # ((c == ' ') and (TL.iloc[i+1]['CharInd'] == 0) and (TL.iloc[i+1]['Op'] == '+')):
-                    text_ += ''.join(word_)
-                    word_ = []
-                    wordprev_ = []
 
-                    word_ind += 1
-                    char_ind = 0
-                    char_ms, mistake, first_typed_char = reset_word_vars()
+            # RESET for next character
+            keystrokes = []
+
+
+    # Which word does each character belong to, as well as index within word
+    word_nums = [0]
+    word_inds = [0]
+    # Look at previous character
+    for c in chars_text[:-1]:
+        if c == ' ':
+            word_nums.append(word_nums[-1]+1)
+            word_inds.append(0)
         else:
-            mistake = True
-            # Set this variable for just the first character
-            if first_typed_char == '':
-                first_typed_char = c
+            word_nums.append(word_nums[-1])
+            word_inds.append(word_inds[-1]+1)
+    
+    C = pd.DataFrame({'Char':chars_text, 'Word':word_nums, 'WordInd':word_inds, 'Ms':chars_ms, 'Mistake':mistakes, 'Typed':chars_typed})
 
-        # # If we've reached the end of the text or end of word
-        # if len(word_):
-        #     if ''.join(word_) == words[word_ind]:
-        #     # if (i == num_entries-1) or \
-        #         # ((c == ' ') and (TL.iloc[i+1]['CharInd'] == 0) and (TL.iloc[i+1]['Op'] == '+')):
-        #         text_ += ''.join(word_)
-        #         word_ = []
-        #         wordprev_ = []
-
-        #         word_ind += 1
-        #         char_ind = 0
-        #         char_ms, mistake, first_typed_char = reset_word_vars()
-
-    C = pd.DataFrame({'WordInd':word_inds, 'Char':chars_text, 'Ms':chars_ms, 'Mistake':mistakes, 'Typed':chars_typed})
 
     ## WORDS
 
+    words=  text.split(' ')
+    words[:-1] = [w+' ' for w in words[:-1]]
+
     words_ms = []
     # The full attempt for this word
-    word_keystrokes = []
     word_mistakes = []
     word_lens = []
-    # Number of keystrokes needed (not entries)
-    word_strokes = []
 
-    word_inds_0 = TL['WordInd'].to_numpy()
-    word_inds_1 = C['WordInd'].to_numpy()
+    for _,W in C.groupby('Word'):
+        words_ms.append(W['Ms'].sum())
+        word_mistakes.append(W['Mistake'].sum())
+        word_lens.append(len(W))
 
-    ops = TL['Op'].to_numpy()
-    inds_add = (ops == '+') | (ops == '$')
-    
-    assert(len(np.unique(word_inds)) == len(words))
-    for i in range(len(words)):
-        inds_0 = word_inds_0 == i
-        inds_1 = word_inds_1 == i
-        words_ms.append(TL['Ms'][inds_0].sum())
+    # This will automatically check that 
+    #   the number of words from the text (words list) matches the number of words found in C (other lists)
+    # W = pd.DataFrame({'Attempt':word_keystrokes, 'Keystrokes':word_strokes})
+    W = pd.DataFrame({'Word':words, 'Ms':words_ms, 'Mistakes':word_mistakes, 'Length':word_lens})
 
-        word_keystrokes.append(''.join(TL['Char'][inds_0 & inds_add]))
-        word_mistakes.append(C['Mistake'][inds_1].any())
-
-        word_lens.append(len(words[i]))
-
-        inds = TL[inds_0].index
-        word_strokes.append(inds.max() - inds.min() + 1)
-
-    W = pd.DataFrame({'Word':words, 'Attempt':word_keystrokes, 'Ms':words_ms, 'Mistake':word_mistakes, 'Length':word_lens, 'Keystrokes':word_strokes})
-
-    return TL, C, W, text_
+    return TL, C, W, text
 
 
 # Parse the second half of typingLog
 #   This contains *all* the keystrokes
 def parse_typinglog_complete(tl:str):
-    # Split by |
     T = tl[typinglog_pipe(tl)+1:]
     # Do this to make regex better
     T = ',' + T[:-1]
 
-    # Split into words
+
+    ## WINDOWS
+
+    # Split into windows
     wordnums_pattern = r',(\d+),(\d+),'
     # This makes it so regex matches are all unique (no overlaps)
     wordnums_pattern_ = wordnums_pattern.replace('(', '').replace(')', '')
-    
-    # Each word now comprises of multiple keystrokes
-    # Format for each entry: 
-    #   ,{ms},{ind}{op}{char},
+
+    # Each window starts with \d,\d
+    wordnums = re.findall(wordnums_pattern, T)
+    # These are the indices in the original text and the number of strokes per window
+    text_inds, num_strokes = zip(*wordnums)
+    text_inds = [int(i) for i in text_inds]
+    num_strokes = [int(i) for i in num_strokes]
+
+    # Get the keystrokes per window
+    windows = re.split(wordnums_pattern_, T)[1:]
+    # * Implicity checks for equality of length (windows processed correctly)
+    W = pd.DataFrame({'Window': windows, 'NumStrokes': num_strokes, 'TextInd': text_inds})
+
+
+    ## KEYSTROKES
+
+    # Each window now comprises of multiple keystrokes
+    # Each keystroke is comprised of one or more entries
+    # Each entry has this pattern
+    #   ,{ms},{kestroke},
+    # Use this pattern to separate out each keystroke
+    #   Looking for the ms is more robust than finding keystrokes
     ms_pattern = r',-?\d+,'
     char_pattern = r'(\d+)([+\-$])(\\"|.)'
 
-    word_attempts = re.split(wordnums_pattern_, T)[1:]
+    # For each keystroke
+    strokes, strokes_ms, window_nums = ([] for _ in range(3))
 
-    # Arrays for DataFrame, values for each entry
-    times = []
-    char_inds = []
-    ops = []
-    chars = []
+    for w in W.itertuples():
+        # For regex robustness
+        window_ = ',' + w.Window
+        ms_vals = re.findall(ms_pattern, window_)
+        keystrokes = re.split(ms_pattern, window_)[1:]
 
-    # Which word
-    word_inds = []
-    # DataFrame index is for each typingLog keystroke (can have duplicates)
-    #   ** a keystroke may have multiple "entries" (i.e. selection -> replace)
-    pd_inds = []
+        # Window contains multiple keystrokes
+        for s, (ms_, stroke) in enumerate(zip(ms_vals, keystrokes)):
+            ms = int(ms_[1:-1])
 
-    # NOTE: 
-    # Text has multiple words -> the user attempts the word -> the attempt is comprised of multiple keystrokes 
-    #   -> an keystroke is usually just one typingLog entry, but can be multiple (if select & replace)
+            strokes.append(stroke)
+            strokes_ms.append(ms)
+            window_nums.append(w.Index)
 
-    i = -1
-    # Loop through each full word (i.e. all keystrokes for that attempt)
-    for w,W in enumerate(word_attempts):
-        W_ = ',' + W
-        ms_vals = re.findall(ms_pattern, W_)
-        keystrokes = re.split(ms_pattern, W_)[1:]
-
-        for ms_str, keystroke in zip(ms_vals, keystrokes):
-            ms = int(ms_str[1:-1])
-
-            entries = re.findall(char_pattern, keystroke)
-            # Iterate the typingLog keystroke (dataframe index)
-            i += len(entries) != 0
-            assert(len(entries) > 0)
-
-            for char_ind_, op, char in entries:
-                char_ind = int(char_ind_)
-                # ! Sometimes TypeRacer saves consecutive +'s as one "keystroke"
-                # Rarely, these two adds are from different words
-                #   but the second character (from second word) gets added to the previous word
-                # (Without the original text) This can only be detected when you get to the second word
-                #   Here, the new character should get character index 0
-                #   If it's not 0, then the glitch occurred
-                if len(ops) > 1:
-                    if op == '+' and ops[-1] == '+' and char_inds[-1] > char_ind and char_ind != 0:
-                        # print('fix')
-                        for inds_fix in range(char_ind,0,-1):
-                            char_inds[-inds_fix] = char_ind-inds_fix
-                            word_inds[-inds_fix] = w
-                
-                times.append(ms)
-
-                char_inds.append(char_ind)
-                ops.append(op)
-                
-                # The "character" found with regex can be \" (two characters), so take the last index
-                chars.append(char[-1])
-
-                pd_inds.append(i)
-                word_inds.append(w)
-
-                # Only save the ms once (to avoid double-dipping)
-                ms = 0
-
-    if True:
-        # ! Special case:
-        #   Glitch where keystroke encompasses addition of whole word
-        #   * Right now, only detecting this is if word is comprised of all additions (no mistakes)
-        checkWord = False
-        ind = 0
-        for i in range(len(char_inds)-1):
-            if chars[i] == ' ':
-                if checkWord and i-ind>0:
-                    if all([pd_inds[i_] == pd_inds[ind] for i_ in range(ind,i+1)]):
-                        char_inds[ind:i+1] = range(i+1-ind)
-                        word_inds[ind:] = [w+1 for w in word_inds[ind:]]
-                checkWord = char_inds[i+1] != 0 and ops[i] == '+'
-                ind = i+1
-            if not checkWord:
-                continue
-            if ops[i] != '+':
-                checkWord = False
-                continue
+    S = pd.DataFrame({'Stroke': strokes, 'Ms': strokes_ms, 'Window': window_nums})
 
 
-    TL = pd.DataFrame({'WordInd':word_inds, 'CharInd':char_inds, 'Char':chars, 'Ms':times, 'Op':ops}, index=pd_inds)
+    ## ENTRIES
+
+    # Entry(ies) can be found in each keystroke
+    # Each keystroke has this pattern
+    #   ,({ind}{op}{char})+,
+    # * "ind" is the "window_ind", or the index in the window being typed
+    char_pattern = r'(\d+)([+\-$])(\\"|.)'
+
+    window_inds, chars, ops, char_ms, window_nums, stroke_nums, stroke_inds = \
+        ([] for _ in range(7))
+
+    for s in S.itertuples():
+        entries = re.findall(char_pattern, s.Stroke)
+        num_entries = len(entries)
+        assert(num_entries > 0)
+
+        # NOTE: Two ways of saving ms for keystrokes w multiple entries
+        # 1. First entry gets the whole ms, other entries get 0
+        ms = s.Ms
+        # # 2. Divide between number of entries
+        # ms = s.Ms / num_entries
+
+        # This is which stroke (from the strokes DataFrame) the entry(ies) come from
+        stroke_num = s.Index
+        # This is the window that the stroke came from
+        window_num = s.Window
+
+        for i, (char_ind_, op, char) in enumerate(entries):
+            char_ind = int(char_ind_)
+
+            # The "character" found with regex can be \" (two characters), so take the last index
+            chars.append(char[-1])
+            ops.append(op)
+            # This is "purportly" the index within the full window
+            # ! This is from typingLog, so can be buggy!
+            window_inds.append(char_ind)
+            
+            char_ms.append(ms)
+
+            stroke_nums.append(stroke_num)
+            # Individual entry's index in the stroke
+            stroke_inds.append(i)
+
+            window_nums.append(window_num)
+            
+            # Only save the ms once (to avoid double-dipping)
+            # Only relevant to first way of saving Ms (see above)
+            ms = 0
+
+    TL = pd.DataFrame({'Window': window_nums, 'WindowInd': window_inds, 'Char': chars, 'Op': ops, 'Ms': char_ms, 'Stroke': stroke_nums, 'StrokeInd': stroke_inds})
+    return TL, S, W
+
+
+# The typingLog contains some keystrokes consisting of multiple entries
+# Some such keystrokes are just multiple additions in a row
+# To make typingLog parsing eeasier, split these into multiple keystrokes
+def split_typinglog_addition_entries(TL):
+    # For speed, use numpy arrays
+    strokes = TL['Stroke'].to_numpy()
+    stroke_inds = TL['StrokeInd'].to_numpy()
+    chars = TL['Char'].to_numpy()
+    ops = TL['Op'].to_numpy()
+    mss = TL['Ms'].to_numpy()
+
+    # When we split keystrokes, the keystroke numbers will increase for the remaining keystrokes
+    # Keep track of that increase
+    stroke_offset = 0
+    # Compute indices upfront, since we will be editing the strokes array
+    stroke_inds_all = [strokes == s for s in range(strokes[-1]+1)]
+    for s,inds in enumerate(stroke_inds_all):
+        strokes[inds] += stroke_offset
+        # Number of entries
+        ne = np.count_nonzero(inds)
+        # Normal keystroke (w one entry), ignore
+        if ne == 1:
+            continue
+
+        # Special case: duplicate punctuation at the end of the text stored as single keystroke
+        if s == len(stroke_inds_all)-1:
+            stroke_full = ''.join(chars[inds])
+            if not stroke_full.endswith('...'): 
+                if chars[inds][-1] == chars[inds][-2]:
+                    continue
+
+        if np.all(ops[inds] == '+'):
+            # Split keystroke
+            strokes[inds] = strokes[inds] + np.arange(ne)
+            stroke_offset += (ne-1)
+
+            stroke_inds[inds] = 0
+            # TODO: Should handle milliseconds as well (divide evenly? instead of just setting to 0)
+
+    TL['Stroke'] = strokes
+    TL['StrokeInd'] = stroke_inds
+    TL['Op'] = ops
+    TL['Ms'] = mss
     return TL
+
+
+# Reconstruct text from typingLog DataFrame (containing keystrokes)
+def reconstruct_text_typinglog(TL):
+    # Keep track of text entered thus far (including incorrect chars)
+    entries = []
+    # After each keystroke, record the state of the text
+    states = []
+
+    windows = TL['Window'].to_numpy()
+
+    tl_window_inds = TL['WindowInd'].to_numpy()
+    tl_chars = TL['Char'].to_numpy()
+    tl_ops = TL['Op'].to_numpy()
+    tl_strokes = TL['Stroke'].to_numpy()
+
+    # for _,W in TL.groupby('Window'):
+    for w in range(windows[-1]+1):
+        tl_inds = windows == w
+
+        # Add a dummy stroke at the end (to simulate next new keystroke)
+        # strokes = W['Stroke'].to_list() + [-1]
+        strokes = list(tl_strokes[tl_inds]) + [-1]
+
+        window_start_ind = len(entries)
+        if len(entries) and entries[-1] != ' ':
+            # Move the window back to the last space
+            window_start_ind = len(entries) - entries[::-1].index(' ')
+        # for i,w in enumerate(W.itertuples()):
+        for i,(ind, c, op) in enumerate(zip(tl_window_inds[tl_inds], tl_chars[tl_inds], tl_ops[tl_inds])): 
+            text_ind = ind + window_start_ind
+
+            if op == '+':
+                entries.insert(text_ind, c)
+                assert(entries[text_ind] == c)
+
+            elif op == '-':
+                assert(entries[text_ind] == c)
+                entries.pop(text_ind)
+
+            elif op == '$':
+                entries[text_ind] = c
+                assert(entries[text_ind] == c)
+
+            # If we're at the end of a stroke, THEN record state of text
+            if strokes[i+1] != strokes[i]:
+                states.append(''.join(entries))
+    
+
+    text = ''.join(entries)
+    # Check if there was a duplicate punctuation at the end of the text (TypeRacer bug, or input lag perhaps)
+    # The duplicate characters should be from the same keystroke (probably)
+    # Ignore the ellipses case
+    if len(text) > 3:
+        if text[-1] == text[-2] and TL.iloc[-1]['Stroke'] == TL.iloc[-2]['Stroke'] and text[-3:] != '...':
+            text = text[:-1]
+            states[-1] = states[-1][:-1]
+
+    return text, states
 
 
 # Parse the first half of typingLog
 # This contains all the correct characters and the time it took to *correctly* type each
-#   * not all keystrokes, only correct ones shown
+#   * not all entries, only correct ones shown
 def parse_typinglog_simple(tl:str) -> pd.DataFrame:
     # Split by |
     T = tl[:typinglog_pipe(tl)]
@@ -418,6 +534,9 @@ def parse_typinglog_wordvals(tl:str):
     return text_inds, num_strokes
     
 
+##
+# STATS
+
 # Takes the characters DataFrame (computed by parse_typinglog()) and computes WPM
 # Ideal for computing section WPM by inputting subsets the DataFrame
 # Allows for computing WPM without spaces, etc
@@ -459,37 +578,28 @@ def compute_wpm_acc(df:pd.DataFrame, text_opt=None, ms_opt=None) -> float:
 
 
 # FOR TESTING PURPOSES
-# Loop through all ways to compute WPM (purportedly)
-# Return the wpm with minimum error and its options
-def compute_wpm_best(df, wpm_tp):
+# Loop through all (purportedly) ways to compute WPM/Accuracy
+# Return the value with minimum error and its options
+def compute_wpm_acc_best(df, target, wpm_or_acc):
     opts = ['all', 'no_spaces', 'no_endchar', 'no_endspace']
 
+    if wpm_or_acc == 'wpm':
+        output_ind = 0
+    elif wpm_or_acc == 'acc':
+        output_ind = 1
+
     min_diff = np.inf
-    wpm = np.inf
+    estimate = np.inf
     opt_t, opt_m = 'all', 'all'
     for m in opts:
         for t in opts:
-            wpm_ = compute_wpm_acc(df, t,m)[0]
-            wpm_diff = abs(wpm_tp - wpm_)
-            if wpm_diff < min_diff:
-                min_diff = wpm_diff
-                wpm = wpm_
+            estimate_ = compute_wpm_acc(df, t,m)[output_ind]
+            diff = abs(target - estimate_)
+            if diff < min_diff:
+                min_diff = diff
+                estimate = estimate_
                 opt_t, opt_m = t, m
 
-    return wpm, opt_t, opt_m
-def compute_acc_best(df, acc_tp):
-    opts = ['all', 'no_spaces', 'no_endchar', 'no_endspace']
+    return estimate, opt_t, opt_m
 
-    min_diff = np.inf
-    acc = np.inf
-    opt_t, opt_m = 'all', 'all'
-    for m in opts:
-        for t in opts:
-            acc_ = compute_wpm_acc(df, t,m)[1]
-            acc_diff = abs(acc_tp - acc_)
-            if acc_diff < min_diff:
-                min_diff = acc_diff
-                acc = acc_
-                opt_t, opt_m = t, m
 
-    return acc, opt_t, opt_m
