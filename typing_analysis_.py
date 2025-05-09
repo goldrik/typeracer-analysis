@@ -14,7 +14,8 @@ import re
 ##
 # TEXT
 
-# Determine the sections
+# Divide text into roughtly equal-length sections
+# This may not match the sections identified by TypeRacer (found on each race webpage)
 def text_to_sections(text: str, numSections: int=8) -> list[str]:
     section_len_chars = len(text) / numSections
     # Exact characters where the text may be divided into sections
@@ -359,20 +360,27 @@ def parse_typinglog_complete(tl:str):
     return TL, S, W
 
 
+# The typingLog contains some keystrokes consisting of multiple entries
+# Some such keystrokes are just multiple additions in a row
+# To make typingLog parsing eeasier, split these into multiple keystrokes
 def split_typinglog_addition_entries(TL):
+    # For speed, use numpy arrays
     strokes = TL['Stroke'].to_numpy()
     stroke_inds = TL['StrokeInd'].to_numpy()
     chars = TL['Char'].to_numpy()
     ops = TL['Op'].to_numpy()
     mss = TL['Ms'].to_numpy()
 
+    # When we split keystrokes, the keystroke numbers will increase for the remaining keystrokes
+    # Keep track of that increase
     stroke_offset = 0
-
+    # Compute indices upfront, since we will be editing the strokes array
     stroke_inds_all = [strokes == s for s in range(strokes[-1]+1)]
     for s,inds in enumerate(stroke_inds_all):
         strokes[inds] += stroke_offset
         # Number of entries
         ne = np.count_nonzero(inds)
+        # Normal keystroke (w one entry), ignore
         if ne == 1:
             continue
 
@@ -384,12 +392,12 @@ def split_typinglog_addition_entries(TL):
                     continue
 
         if np.all(ops[inds] == '+'):
-            # Split
+            # Split keystroke
             strokes[inds] = strokes[inds] + np.arange(ne)
             stroke_offset += (ne-1)
 
             stroke_inds[inds] = 0
-            # ! Should handle milliseconds as well (divide evenly?)
+            # TODO: Should handle milliseconds as well (divide evenly? instead of just setting to 0)
 
     TL['Stroke'] = strokes
     TL['StrokeInd'] = stroke_inds
@@ -459,7 +467,7 @@ def reconstruct_text_typinglog(TL):
 
 # Parse the first half of typingLog
 # This contains all the correct characters and the time it took to *correctly* type each
-#   * not all keystrokes, only correct ones shown
+#   * not all entries, only correct ones shown
 def parse_typinglog_simple(tl:str) -> pd.DataFrame:
     # Split by |
     T = tl[:typinglog_pipe(tl)]
