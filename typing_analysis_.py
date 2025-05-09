@@ -68,15 +68,19 @@ def typinglog_pipe(tl: str) -> int:
 def parse_typinglog(tl):
     # This gives us all the keystrokes/entries first
     TL = parse_typinglog_complete(tl)[0]
-    text, partials = reconstruct_text_typinglog(TL)
+
+    TL_ = TL.copy()
+    TL_ = split_typinglog_addition_entries(TL_)
+
+    text, partials = reconstruct_text_typinglog(TL_)
 
     # TypingLog DataFrame arrays
     # Save as numpy arrays instead for MUCH faster iteration
-    tl_window_inds = TL['WindowInd'].to_numpy()
-    tl_chars = TL['Char'].to_numpy()
-    tl_ops = TL['Op'].to_numpy()
-    tl_ms = TL['Ms'].to_numpy()
-    tl_strokes = TL['Stroke'].to_numpy()
+    tl_window_inds = TL_['WindowInd'].to_numpy()
+    tl_chars = TL_['Char'].to_numpy()
+    tl_ops = TL_['Op'].to_numpy()
+    tl_ms = TL_['Ms'].to_numpy()
+    tl_strokes = TL_['Stroke'].to_numpy()
 
 
     ## CHARACTERS
@@ -117,7 +121,7 @@ def parse_typinglog(tl):
             keystrokes = np.array(keystrokes)
             inds_strokes = np.isin(tl_strokes, keystrokes)
             num_entries = np.count_nonzero(inds_strokes)
-            # TL_ = TL[inds_strokes]
+            # S = TL_[inds_strokes]
 
 
             # Given all the keystrokes needed to type the new characters
@@ -132,11 +136,13 @@ def parse_typinglog(tl):
             entry_ind = -1
             new_chars_ = new_chars
             char_ms, mistake, char_typed = reset_vars()
+            nc = 1
             for i,(ind, c, op, ms) in enumerate(zip( \
                     tl_window_inds[inds_strokes], tl_chars[inds_strokes], tl_ops[inds_strokes], tl_ms[inds_strokes]) ):
                 # BY DEFINITION, the last new character was typed at the end of the keystrokes
                 #   This is given by the way we defined this loop (partials)
-                if len(new_chars_) == 1:
+                # if len(new_chars_) == 1:
+                if nc == len(new_chars):
                     break
                 # If last entry, let the for loop (below) handle it
                 if i == num_entries-1:
@@ -147,8 +153,6 @@ def parse_typinglog(tl):
                 # Character typed
                 if char_typed == '':
                     char_typed = c
-                    if op == '-':
-                        print('something')
 
                 # Update window with new entry
                 if op == '+':
@@ -160,14 +164,17 @@ def parse_typinglog(tl):
 
                 window_text = ''.join(window)
                 # Check if the latest typed character matches
-                if len(window_text) and window_text[-1] == new_chars_[0]:
+                # if len(window_text) == (len(new_chars)-len(new_chars_)+1) and window_text[-1] == new_chars_[0]:
+                if window_text == new_chars[:nc]:
                     # Do not count the entry if it's a deletion (unless at end of keystroke)
-                    # if op != '-' or TL_['Stroke'].iloc[i+1] != TL_['Stroke'].iloc[i]:
+                    # if op != '-' or S['Stroke'].iloc[i+1] != S['Stroke'].iloc[i]:
                     if op != '-' or tl_strokes[inds_strokes][i+1] != tl_strokes[inds_strokes][i]:
                         entry_ind = i
-
-                        chars_text.append(new_chars_[0])
-                        new_chars_ = new_chars_[1:]
+                        
+                        # chars_text.append(new_chars_[0])
+                        # new_chars_ = new_chars_[1:]
+                        chars_text.append(new_chars[nc-1])
+                        nc += 1
 
                         chars_ms.append(char_ms)
                         mistakes.append(mistake)
@@ -180,19 +187,27 @@ def parse_typinglog(tl):
                     mistake = True
 
             # The rest of the chars
+            new_chars_ = new_chars[nc-1:]
             nc = len(new_chars_)
             # If the number of new characters matches the number of entries, no mistake
             mistake = nc != np.count_nonzero(inds_strokes)-(entry_ind+1)
+            ms = np.sum(tl_ms[inds_strokes][entry_ind+1:])
             for c in new_chars_:
                 chars_text.append(c)
-                chars_ms.append(np.sum(tl_ms[inds_strokes][entry_ind+1:]) / nc)
+                chars_ms.append(ms)
+                # chars_ms.append(ms / nc)
                 mistakes.append(mistake)
                 if mistake:
                     chars_typed.append(tl_chars[inds_strokes][entry_ind+1])
                 else:
                     chars_typed.append(c)
 
+                ms = 0
+
+
+            # RESET for next character
             keystrokes = []
+
 
     # Which word does each character belong to, as well as index within word
     word_nums = [0]
@@ -269,6 +284,7 @@ def parse_typinglog_complete(tl:str):
     # Use this pattern to separate out each keystroke
     #   Looking for the ms is more robust than finding keystrokes
     ms_pattern = r',-?\d+,'
+    char_pattern = r'(\d+)([+\-$])(\\"|.)'
 
     # For each keystroke
     strokes, strokes_ms, window_nums = ([] for _ in range(3))
@@ -439,7 +455,6 @@ def reconstruct_text_typinglog(TL):
             states[-1] = states[-1][:-1]
 
     return text, states
-
 
 
 # Parse the first half of typingLog
