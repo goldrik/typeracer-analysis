@@ -343,6 +343,46 @@ def parse_typinglog_complete(tl:str):
     return TL, S, W
 
 
+def split_typinglog_addition_entries(TL):
+    strokes = TL['Stroke'].to_numpy()
+    stroke_inds = TL['StrokeInd'].to_numpy()
+    chars = TL['Char'].to_numpy()
+    ops = TL['Op'].to_numpy()
+    mss = TL['Ms'].to_numpy()
+
+    stroke_offset = 0
+
+    stroke_inds_all = [strokes == s for s in range(strokes[-1]+1)]
+    for s,inds in enumerate(stroke_inds_all):
+        strokes[inds] += stroke_offset
+        # Number of entries
+        ne = np.count_nonzero(inds)
+        if ne == 1:
+            continue
+
+        # Special case: duplicate punctuation at the end of the text stored as single keystroke
+        if s == len(stroke_inds_all)-1:
+            stroke_full = ''.join(chars[inds])
+            if not stroke_full.endswith('...'): 
+                if chars[inds][-1] == chars[inds][-2]:
+                    continue
+
+        if np.all(ops[inds] == '+'):
+            # Split
+            strokes[inds] = strokes[inds] + np.arange(ne)
+            stroke_offset += (ne-1)
+
+            stroke_inds[inds] = 0
+            # ! Should handle milliseconds as well (divide evenly?)
+
+    TL['Stroke'] = strokes
+    TL['StrokeInd'] = stroke_inds
+    TL['Op'] = ops
+    TL['Ms'] = mss
+    return TL
+
+
+# Reconstruct text from typingLog DataFrame (containing keystrokes)
 def reconstruct_text_typinglog(TL):
     # Keep track of text entered thus far (including incorrect chars)
     entries = []
