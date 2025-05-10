@@ -15,17 +15,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 
+from url_formatstrings import url_user
+
 ##
 # URL HANDLING
 
 # Return HTML text and BeautifulSoup object from given URL
 #   Option: Save html to dictionary so to prevent repeat loading
-def read_url(wp:str, htmlDict:dict=None, 
+def read_url(wp:str, htmlDict:dict=None, reloadHtml=False, 
              useSelenium:bool=False, driver:webdriver.Chrome=None) -> str:
     print(wp)
 
     # TODO handle case where loaded HTML (in dict) was not loaded with selenium
-    if htmlDict is not None:
+    if not reloadHtml and htmlDict is not None:
         if wp in htmlDict:
             html = htmlDict[wp]
             soup = BeautifulSoup(html, 'html.parser')
@@ -61,6 +63,7 @@ def read_url(wp:str, htmlDict:dict=None,
         html = getHTML(wp)
 
     
+    str_error_429 = '429 Too Many Requests'
     str_user_invalid0 = 'We couldn\'t find a profile for username'
     str_user_invalid1 = 'There is no user'
     str_date_invalid = 'No results matching the given search criteria.'
@@ -70,6 +73,8 @@ def read_url(wp:str, htmlDict:dict=None,
     # Handle exceptions
     if not html:
         raise Exception('Error: Request timed out indefinitely, exiting...')
+    if str_error_429 in html:
+        raise Exception('Error: 429 - Too many requests, exiting...')
     if (str_user_invalid0 in html) or (str_user_invalid1 in html):
         raise Exception('Error: Invalid user given, exiting...')
     if str_date_invalid in html:
@@ -129,6 +134,20 @@ def next_day_to_str(dt) -> str:
 
 ##
 # MISCELLANEOUS
+
+# Return number of races
+# https://data.typeracer.com/pit/profile ...
+def extract_num_races(user:str) -> int:
+    _, soup = read_url(url_user.format(user))
+    stats = soup.find_all('div', class_='Profile__Stat')
+    for stat in stats:
+        label = stat.find('span', class_='Stat__Btm')
+        if label.text.strip() == 'Races':
+            value = stat.find('span', class_='Stat__Top')
+            return int(value.text.strip().replace(',', ''))
+        
+    raise Exception('ERROR: Parsing User webpage failed')
+
 
 # Given two iterables (list, array), find the indices in indsRef which are missing from indsThis
 #   If an integer ind2 is given instead (for indsRef), use a list of indices from 1 to N
