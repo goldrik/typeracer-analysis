@@ -14,25 +14,90 @@
 #   DataFrame - for profile page (table of races)
 #   tuple - for pages corresponding to one single race or text
 
+# NOTE: Exceptions are to indicate unexpected TypeRacer webpage format only
+
+
 import numpy as np
 import pandas as pd
+
+import re
 
 from bs4 import BeautifulSoup
 from typeracer_utils import str_to_datetime
 from typing_analysis import parse_typinglog_simple
 
+
 ##
-# Return number of races
 # https://data.typeracer.com/pit/profile ...
-def extract_num_races(soup:BeautifulSoup) -> int:
-    stats = soup.find_all('div', class_='Profile__Stat')
-    for stat in stats:
-        label = stat.find('span', class_='Stat__Btm')
-        if label.text.strip() == 'Races':
-            value = stat.find('span', class_='Stat__Top')
-            return int(value.text.strip().replace(',', ''))
+def parse_profile_info(soup:BeautifulSoup) -> int:
+    info = {}
+
+    name_parts = soup.find_all('h2')[1].text.strip().split('\n')
+    if len(name_parts) == 3:
+        info['Name'] = name_parts[0]
+    if len(name_parts) not in [1,3]:
+        raise Exception('ERROR: Unexpected "name (user)" format in TypeRacer profile page')
+
+    im_str = soup.find('div', class_='profileCar')['style']
+    # avatarname.ext (2-4 chars, to account for some file extensions)
+    avatar_match = re.search(r'avatars/(.*)\.(.{2,4})"\)', im_str)
+    if avatar_match:
+        info['Avatar'] = avatar_match.group(1)
+        info['AvatarFilename'] = avatar_match.group(1) + '.' + avatar_match.group(2)
+    else:
+        raise Exception('ERROR: Parsing User avatar failed')
+
+    spans = soup.find('div', class_='About').find_all('span')
+    assert(len(spans) % 2 == 0)
+    for i in range(0, len(spans), 2):
+        label = spans[i].text[:-1]
+        value = spans[i+1].text
+        if label == 'Racing Since':
+            value = str_to_datetime(value)
+        elif label == 'Location':
+            locs = [loc.strip() for loc in value.split('\n')]
+            locs = [loc for loc in locs if loc != '']
+            value = ' '.join(locs)
+        elif label == 'Keyboard':
+            pass
+        else:
+            raise Exception('ERROR: Unexpected section found in User profile page')
         
-    raise Exception('ERROR: Parsing User webpage failed')
+        info[label] = value
+
+    # It is valid for these values to be missing from TypeRacer profile
+    for label in ['Name', 'Location', 'Keyboard']:
+        if label not in info:
+            info[label] = ''
+
+    return info
+
+
+# https://data.typeracer.com/pit/profile ...
+def parse_profile_stats(soup:BeautifulSoup) -> int:
+    stats = {}
+
+    stats_div = soup.find_all('div', class_='Profile__Stat')
+    for stat in stats_div:
+        label = stat.find('span', class_='Stat__Btm').text.strip()
+        value = stat.find('span', class_='Stat__Top').text.strip()
+        if label == 'Full Avg.':
+            value = float(value.split(' WPM')[0])
+        elif label == 'Best Race':
+            value = int(value.split(' WPM')[0])
+        elif label == 'Races':
+            value = int(value.replace(',', ''))
+        elif label == 'WPM %':
+            value = float(value.replace('%', ''))
+        elif label == 'Skill Level':
+            pass
+        elif label == 'Exp Level':
+            pass
+        else:
+            raise Exception('ERROR: Unexpected section found in User profile page')
+        
+        stats[label] = value
+    return stats
 
 
 ##
@@ -62,24 +127,27 @@ def parse_races(soup:BeautifulSoup) -> pd.DataFrame:
 # Return single-race results for a user
 # In this project, it is used to supplement parse_race_self(), 
 #   extracting minimal information for the opponents' races
-def parse_race(soup:BeautifulSoup) -> tuple[int, float, int, str]:
-    R = extract_race_details(soup)
-    typing_log = extract_typing_log(soup)
+# def parse_race(soup:BeautifulSoup) -> tuple[int, float, int, str]:
+#     R = extract_race_details(soup)
+#     typing_log = extract_typing_log(soup)
 
-    return R['wpm'], R['accuracy'], R['rank'], typing_log
+#     return R['wpm'], R['accuracy'], R['rank'], typing_log
 
 
 # Parses the raceDetails table found in the race page
 # Returns dictionary with each details from each row
-def extract_race_details(soup:BeautifulSoup) -> dict:
+def parse_race(soup:BeautifulSoup) -> tuple[dict, dict]:
     table = soup.find('table', class_='raceDetails')
     rows = table.find_all('tr')
 
     # Initialize opponents lists in case none exist
     opps = []
     opp_races = []
+    opp_ranks= []
 
-    race_details = {}
+    details = {}
+    # List of names and race numbers
+    opponents = {}
     for row in rows:
         cols = row.find_all('td')
         col_name = cols[0].get_text(strip=True)
@@ -88,39 +156,47 @@ def extract_race_details(soup:BeautifulSoup) -> dict:
         if col_name == 'Racer':
             user_link = cols[1].find('a')['href']
             user_str = '?user='
-            race_details['user'] = user_link[ user_link.find(user_str) + len(user_str) : ]
+            details[col_name] = user_link[ user_link.find(user_str) + len(user_str) : ]
 
         elif col_name == 'Race Number':
-            race_details['race'] = int(col_val)
+            details[col_name] = int(col_val)
 
         elif col_name == 'Date':
-            race_details['datetime'] = str_to_datetime(col_val)
+            details[col_name] = str_to_datetime(col_val)
 
         elif col_name == 'Speed':
             wpm = float(col_val.split(' WPM')[0])
             if wpm % 1 != 0:
                 raise Exception(f'WPM {wpm:.2f} IN WEBPAGE WAS NOT AN INTEGER')
-            race_details['wpm'] = int(wpm)
+            details[col_name] = int(wpm)
 
         elif col_name == 'Accuracy':
-            race_details['accuracy'] = float(col_val[:-1])
+            details[col_name] = float(col_val[:-1])
 
         elif col_name == 'Rank':
-            race_details['rank'] = int(col_val[0])
-            race_details['racers'] = int(col_val[-2])
+            details[col_name] = int(col_val[0])
+            details['NumRacers'] = int(col_val[-2])
 
         elif col_name == 'Opponents':
             opps_links = cols[1].find_all('a')
             opps = [link.text for link in opps_links]
             opp_races = [int(link['href'].split('|')[-1]) for link in opps_links]
+            opp_ranks= re.findall(r'\((\d)\w{2} place\)', col_val)
 
         else:
-            pass
+            raise Exception('ERROR: Unexpected entry found in race details table')
+        
+    # Save opponents separately
+    opponents['Users'] = opps
+    opponents['Races'] = opp_races
+    opponents['Ranks'] = opp_ranks
 
-    # Each entry in "opponents" is [opponent name, their race number]
-    race_details['opponents'] = [[opp,race] for opp,race in zip(opps,opp_races)]
+    return details, opponents
 
-    return race_details
+
+# This is separate from the race details table
+def extract_textid(soup:BeautifulSoup) -> str:
+    return int( soup.find('a', string='see stats')['href'].split('?id=')[-1] )
 
 
 # Function to handle cases where typingLog js variable doesnt exist
