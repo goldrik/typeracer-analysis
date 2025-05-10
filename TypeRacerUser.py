@@ -13,7 +13,7 @@ _profile_attrs = [
     'Name', 'StartDate', 'Location', 'Keyboard', 'Races', 'AverageWPM', 'BestWPM', 'Avatar'
 ]
 _race_attrs = {
-    'DateTime': object, 'WPM': int, 'Accuracy': float, 'Points': int, 'Rank': int, 'NumRacers': int, 'Opponents': object,
+    'DateTime': object, 'WPM': int, 'Accuracy': float, 'Rank': int, 'NumRacers': int, 'Opponents': object,
     'TextID': int, 'TypedText': str, 'TypingLog': str,
 }
 _racer_attrs = [
@@ -31,22 +31,33 @@ class TypeRacerUser:
     # Denotes Guest racer
     # Use this instead of the string literal 'Guest', since that is a valid username
     GUEST = ''
+    # Default "max races"
+    # Just some number far beyond the max of races for a user
+    # MAX_RACES = int(1e12)
 
     def __init__(self, user, fn_htmls: str=None):
-        self.user = user
-
-        self.htmls = {}
-        self.htmls_pkl = fn_htmls
-
-        # For debugging: May want to reload htmls from TypeRacer (in case of site update)
-        self.reload = False
-
         self.clear()
+
+        self.htmls_pkl = fn_htmls
         self.load_htmls()
+
+        self.user = user
+        self.populate_profile()
 
 
     def clear(self):
+        self.htmls = {}
+        self.htmls_pkl = None
+        # For debugging: May want to reload htmls from TypeRacer (in case of site update)
+        self.reload = False
+
+        # Profile is separate from clear_data()
+        # It should always be set
         self.profile = {attr:None for attr in _profile_attrs}
+        self.clear_data()
+
+
+    def clear_data(self):
         self.races = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in _race_attrs.items()})
         self.racers = pd.DataFrame({col: pd.Series(dtype=object) for col in _racer_attrs})
         self.texts = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in _text_attrs.items()})
@@ -57,11 +68,12 @@ class TypeRacerUser:
         self._opponents = {}
 
     
-    def update(self):
+    def update(self, num_races=1e12):
         self.populate_profile()
-        self.populate_races()
+        self.populate_races(num_load=num_races)
         self.populate_racers()
         self.populate_texts()
+        self.save_htmls()
 
     
     def load_htmls(self, htmls_pkl=None):
@@ -69,6 +81,7 @@ class TypeRacerUser:
             htmls_pkl = self.htmls_pkl
 
         if htmls_pkl is None or not os.path.exists(htmls_pkl):
+            print('WARNING: htmls were not loaded, htmls_pkl class variable either not set or does not exist')
             htmls_ = {}
         else:
             with open(htmls_pkl, 'rb') as f:
@@ -76,6 +89,36 @@ class TypeRacerUser:
         
         # Combine dictionaries
         self.htmls = {**self.htmls, **htmls_}
+
+    
+    def save_htmls(self, htmls_pkl=None):
+        if htmls_pkl is None:
+            htmls_pkl = self.htmls_pkl
+
+        if htmls_pkl is not None:
+            with open(htmls_pkl, 'wb') as f:
+                pickle.dump(self.htmls, f)
+        else: 
+            raise Exception('ERROR: htmls were not saved, htmls_pkl class variable not set')
+    
+
+    def populate_profile(self):
+        # Do not use htmls dict here, this should always be reloaded
+        url = url_user.format(self.user)
+        soup = read_url(url)[1]
+        
+        info = parse_profile_info(soup)
+        stats = parse_profile_stats(soup)
+
+        self.profile['Name'] = info['Name']
+        self.profile['StartDate'] = info['Racing Since']
+        self.profile['Location'] = info['Location']
+        self.profile['Keyboard'] = info['Keyboard']
+        self.profile['Avatar'] = info['Avatar']
+
+        self.profile['Races'] = stats['Races']
+        self.profile['AverageWPM'] = stats['Full Avg.']
+        self.profile['BestWPM'] = stats['Best Race']
     
 
     def populate_races(self, num_load=1e12, inds_load=None):
@@ -84,9 +127,9 @@ class TypeRacerUser:
             inds_load = range(self.profile['Races'], 0, -1)
 
         races_load = get_missing_indices(self.races, inds_load)
-        races_load = races_load[:num_load]
+        races_load = races_load[:int(num_load)]
 
-        races_dict = {c:[] for c in self.races.columns if c != 'Points'}
+        races_dict = {c:[] for c in self.races.columns}
         races_inds = []
         for race in races_load:
             # LOAD PAGE
@@ -107,10 +150,9 @@ class TypeRacerUser:
             races_dict['DateTime'].append(R['Date'])
             races_dict['WPM'].append(R['Speed'])
             races_dict['Accuracy'].append(R['Accuracy'])
-            # races_dict['Points'].append()
             races_dict['Rank'].append(R['Rank'])
             races_dict['NumRacers'].append(R['NumRacers'])
-            races_dict['Racers'].append(O['Users'])
+            races_dict['Opponents'].append(O['Users'])
             races_dict['TextID'].append(textID)
 
             self._opponents[race] = {'Names': O['Users'], 'Races': O['Races'], 'Ranks': O['Ranks']}
@@ -150,7 +192,7 @@ class TypeRacerUser:
             racers_dict['Racers'].append( players['Users'] )
             racers_dict['WPMs'].append( players['WPMs'] )
             racers_dict['Accuracies'].append( players['Accs'] )
-            racers_dict['TypingLogs'].append( players['TLS'] )
+            racers_dict['TypingLogs'].append( players['TLs'] )
 
             racers_inds.append(race)
         
@@ -192,7 +234,7 @@ class TypeRacerUser:
         N = details['NumRacers']
 
         # Initialize racers information
-        players = {
+        players_details = {
             'Users': [TypeRacerUser.GUEST] * N,
             'WPMs': [-1] * N,
             'Accs': [np.nan] * N,
@@ -211,13 +253,13 @@ class TypeRacerUser:
                 player_details = parse_race(soup)[0]
                 player_details['TypingLog'] = extract_typing_log(soup)
             
-            rank = details['Rank']
-            players['Users'][rank-1] = player
-            players['WPMs'][rank-1] = details['Speed']
-            players['Accs'][rank-1] = details['Accuracy']
-            players['TLs'][rank-1] = details['TypingLog']
+            rank = player_details['Rank']
+            players_details['Users'][rank-1] = player
+            players_details['WPMs'][rank-1] = int(player_details['Speed'])
+            players_details['Accs'][rank-1] = float(player_details['Accuracy'])
+            players_details['TLs'][rank-1] = player_details['TypingLog']
 
-        return players
+        return players_details
 
 
     # For each textID in the races dataframe, 
