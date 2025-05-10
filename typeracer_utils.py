@@ -108,21 +108,21 @@ def str_to_datetime(date_str:str):
     date_str = date_str.replace('Sept', 'Sep')
 
     # if date_str.strip().lower() == "today":
-    #     return datetime.today().date()
+    #     return datetime.today()
     # if '+' in date_str:
-    #     return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z').date()
+    #     return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z')
     # if '.' in date_str:
-    #     return datetime.strptime(date_str, '%b. %d, %Y').date()
+    #     return datetime.strptime(date_str, '%b. %d, %Y')
     # else:
-    #     return datetime.strptime(date_str, '%B %d, %Y').date()
+    #     return datetime.strptime(date_str, '%B %d, %Y')
     
     # 05 May 2025: Typeracer changed their date formats for some reason?
     if date_str.strip().lower() == "today":
-        return datetime.today().date()
+        return datetime.today()
     if ':' in date_str:
-        return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S').date()
+        return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S')
     else:
-        return datetime.strptime(date_str, '%b %d, %Y').date()
+        return datetime.strptime(date_str, '%b %d, %Y')
 
 
 # Takes datetime (from DataFrame) and converts to date string for webpage
