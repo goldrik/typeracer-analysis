@@ -23,6 +23,9 @@ _text_attrs = {
     'Text': str, 'Title': str, 'Type': str, 'Author': str, 'Submitter': str,
     'WPM': int, 'Accuracy': float, 'NumWords': int, 'NumChars': int, 'Races': object,
 }
+_results_attrs = {
+    'Date': object, 'WPM': int, 'Accuracy': float, 'Points': int, 'Rank': int, 'NumRacers': int,
+}
 
 
 class TypeRacerUser:
@@ -61,6 +64,7 @@ class TypeRacerUser:
         self.races = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in _race_attrs.items()})
         self.racers = pd.DataFrame({col: pd.Series(dtype=object) for col in _racer_attrs})
         self.texts = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in _text_attrs.items()})
+        self.results = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in _results_attrs.items()})
 
         # This stores the opponent information for each race (Names, Races, Ranks)
         # Used by populate_racers() to build opponents' race URLs without reloading the user's race
@@ -299,6 +303,75 @@ class TypeRacerUser:
         # Update races (for each text)
         for textID in self.texts.index:
             self.texts.at[textID, 'Races'] = self.races[self.races['TextID'] == textID].index.tolist()
+
+
+    def populate_results(self, num_load=None):
+        # First, get the total number of races
+        indsPrev = self.results.index
+
+        n_races = self.profile['Races']
+        racesMissing = get_missing_indices(self.results, n_races)
+
+        if num_load is None:
+            num_load = n_races
+        racesToLoad = racesMissing[:num_load]
+
+        # This is what the dataframe indices should be afterwards
+        indsAfter = np.array(list(set(indsPrev) | set(racesToLoad)))
+
+        wp = self._get_next_results_url( racesToLoad, n_races)
+
+        while wp != '': 
+            try:
+                _, soup = read_url(wp)
+            except:
+                print(f'\t...failed to read webpage. Stop loading races')
+                break
+            
+            results_ = parse_results(soup)
+            results_ = results_.rename(columns={'Speed':'WPM', 'Place':'Rank'})
+            self.results = pd.concat([self.results, results_])
+
+            wp = self._get_next_results_url(racesToLoad, 
+                n_races, lastRaceLoaded=results_.index.min(), currentPageSoup=soup)
+
+        self.results = self.results.loc[indsAfter].copy()
+        self.results = adjust_dataframe_index(self.results)
+
+
+    # Given the list of loaded races and list of races to load
+    #   return the URL to load the next set of missing races
+    # lastRaceLoaded and currentPageSoup are used handle the "older results" link
+    #   both or neither variable must be set at once
+    def _get_next_results_url(self, raceInds:int, maxRaces:int, numRacesToLoad:int=100, 
+                        lastRaceLoaded:int=None, currentPageSoup:BeautifulSoup=None) -> str:
+        str_older = 'load older results'
+
+        # Gaps in races dataframe which may need to be filled in
+        inds = get_missing_indices(self.results, raceInds)
+        if not inds.size:
+            # All races loaded -> return no url
+            return ''
+        
+        ind = inds[0]
+        # If the latest race is missing, start from the beginning
+        if ind == maxRaces:
+            return url_races.format(self.user, numRacesToLoad, '')
+        
+        # Check if this index matches the final index in the recently loaded races
+        if (ind+1) == lastRaceLoaded:
+            if currentPageSoup is None:
+                raise Exception('ERROR: currentPageSoup must be set if lastRaceLoaded is input')
+            older_div = currentPageSoup.find('a', 
+                                                string=lambda text: str_older in text.lower())
+            if older_div is None:
+                raise Exception('ERROR: Could not find "load older results" link')
+            
+            return url_base + 'race_history' + older_div['href']
+        
+        # Otherwise, start from the date (right after) the missing race
+        search_date = next_day_to_str(self.results.loc[ind+1, 'Date'])
+        return url_races.format(self.user, numRacesToLoad, search_date)
 
 
     def method1(self, arg1):

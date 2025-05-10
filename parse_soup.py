@@ -103,22 +103,22 @@ def parse_profile_stats(soup:BeautifulSoup) -> int:
 ##
 # Return DataFrame with basic info for each race found in the table
 # https://data.typeracer.com/pit/race_history ...
-def parse_races(soup:BeautifulSoup) -> pd.DataFrame:
+def parse_results(soup:BeautifulSoup) -> pd.DataFrame:
     # Extract data rows from the 'Scores__Table__Row' divs
     rows_html = soup.find_all('div', class_='Scores__Table__Row')
 
     # Cols to save into the DataFrame
-    rows_df = ['WPM', 'Accuracy', 'Points', 'Rank', 'Players', 'Date']
+    rows_df = ['Speed', 'Accuracy', 'Points', 'Place', 'NumRacers', 'Date']
     rows = {c:[] for c in ['Race'] + rows_df}
     for row_html in rows_html:
         row_text = [col.get_text(strip=True) for col in row_html.find_all('div')]
         rows['Race'].append(int(row_text[0]))
-        rows['WPM'].append(int(row_text[1][:-4]))
+        rows['Speed'].append(int(row_text[1][:-4]))
         rows['Accuracy'].append(float(row_text[2][:-1]))
         rows['Points'].append(int(row_text[3]))
-        rows['Rank'].append(int(row_text[4][0]))
-        rows['Players'].append(int(row_text[4][-1]))
-        rows['Date'].append(str_to_datetime(row_text[5]))
+        rows['Place'].append(int(row_text[4][0]))
+        rows['NumRacers'].append(int(row_text[4][-1]))
+        rows['Date'].append(str_to_datetime(row_text[5]).date())
 
     return pd.DataFrame( {k:rows[k] for k in rows_df}, index=rows['Race'])
 
@@ -127,12 +127,6 @@ def parse_races(soup:BeautifulSoup) -> pd.DataFrame:
 # Return single-race results for a user
 # In this project, it is used to supplement parse_race_self(), 
 #   extracting minimal information for the opponents' races
-# def parse_race(soup:BeautifulSoup) -> tuple[int, float, int, str]:
-#     R = extract_race_details(soup)
-#     typing_log = extract_typing_log(soup)
-
-#     return R['wpm'], R['accuracy'], R['rank'], typing_log
-
 
 # Parses the raceDetails table found in the race page
 # Returns dictionary with each details from each row
