@@ -15,3 +15,6 @@ url_races = url_base + 'race_history?user={}&n={}&startDate={}'
 url_race = url_base + 'result?id=|tr:{}|{}'
 # Text, details about single text, no user information
 url_text = url_base + 'text_info?id={}'
+
+# Image
+url_avatar = 'https://data.typeracer.com/public/images/avatars/{}'
