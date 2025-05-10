@@ -5,11 +5,10 @@
 #!%load_ext autoreload
 #!%autoreload 2
 
-from bs4.element import NavigableString, PageElement
 import numpy as np
 import pandas as pd
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 import os
 import dotenv
@@ -46,9 +45,9 @@ selenium_driver = get_selenium_driver()
 ###
 def init_dataframes():
     races = pd.DataFrame(dtype=int, 
-        columns=['WPM', 'Accuracy', 'Points', 'Rank', 'Players', 'Date', 'DateTime', 'TextID', 'TypingLog', ])
+        columns=['WPM', 'Accuracy', 'Points', 'Rank', 'Players', 'Date', 'DateTime', 'TextID', 'TypedText', 'TypingLog', ])
     for col in ['Accuracy']: races[col] = races[col].astype(float)
-    for col in ['Date', 'DateTime', 'TypingLog']: races[col] = races[col].astype(object)
+    for col in ['Date', 'DateTime', 'TypedText', 'TypingLog']: races[col] = races[col].astype(object)
 
     racers = pd.DataFrame(columns=['Racers', 'WPMs', 'Accuracies', 'TypingLogs'], dtype=object)
 
@@ -62,14 +61,116 @@ def init_dataframes():
     return races, racers, typedata, texts
 
 
+def populate_races_(df, numToLoad=1e9, raceInds=None):
+    # First determine the list of races 
+    if raceInds is None:
+        n_races = extract_num_races(USER)
+        raceInds = range(n_races, 0, -1)
+
+    racesToLoad = get_missing_indices(df, raceInds)
+    racesToLoad = racesToLoad[:numToLoad]
+
+    races_dict = {c:[] for c in df.columns if c != 'Points'}
+    races_inds = []
+
+    for race in racesToLoad:
+        wp = url_race.format(USER, race)
+        _, soup = read_url(wp, htmls, useSelenium=False)
+
+        R = extract_race_details(soup)
+
+        # TEXT ID
+        textID = int( soup.find('a', string='see stats')['href'].split('?id=')[-1] )
+
+        # We are given only the list of opponents, so add self to complete list of players
+        players = [R['user']] + [r[0] for r in R['opponents']]
+        races = [R['race']] + [r[1] for r in R['opponents']]
+
+        players_users = ['Guest'] * R['racers']
+        players_wpms = [-1] * R['racers']
+        players_accs = [np.nan] * R['racers']
+        players_tls = [''] * R['racers']
+        for player_, race_ in zip(players, races):
+            if player_ == R['user']:
+                soup_ = soup
+            else:
+                _, soup_ = read_url(url_race.format(player_, race_), htmls)
+
+            wpm, acc, rank, tl = parse_race(soup_)
+            players_users[rank-1] = player_
+            players_wpms[rank-1] = wpm
+            players_accs[rank-1] = acc
+            players_tls[rank-1] = tl
+
+        # ONLY IF SELENIUM USED
+        if False:
+            mistakes, section_texts, section_wpms = extract_mistakes_sections(soup)
+            
+        # Verify players_wpms is monotonically decreasing, ignoring -1 values
+        wpms_ = [wpm for wpm in players_wpms if wpm != -1]
+        wpms_ = np.array(wpms_)
+        wpms_ = wpms_[wpms_ != -1]
+        np.all(wpms_[:-1] >= wpms_[1:])
+        if not np.all(wpms_[:-1] >= wpms_[1:]):
+            raise Exception('Extracted player WPMs are not monotonically decreasing')
+
+        # try:
+        #     dt, textID, players, players_wpms, players_accs, players_tls = \
+        #         parse_race_self(soup)
+        #     typingLog = players_tls[races.loc[race]['Rank'] - 1]
+        #     # Use typingLog to get the actual text shown to user
+        #     # This differs from the raw text found on the site
+        #     TL_ = parse_typinglog_simple(typingLog)
+        #     typedText = ''.join(TL_['Char'])
+        # except:
+        #     print(f'\t...failed to parse race {race}. Skipping')
+        #     continue
+
+
+        # races = pd.DataFrame(dtype=int, 
+        #     columns=['DateTime', 'WPM', 'Accuracy', 'Points', 'Rank', 'Players', 
+        #              'Racers, WPMs, Accuracies, TypingLogs',
+        #              'TextID', 'TypedText', 'TypingLog', ])
+
+        races_dict['DateTime'].append(R['datetime'])
+        races_dict['WPM'].append(R['wpm'])
+        races_dict['Accuracy'].append(R['accuracy'])
+        # races_dict['Points'].append()
+        races_dict['Rank'].append(R['rank'])
+        races_dict['NumRacers'].append(R['racers'])
+        races_dict['Racers'].append(players_users)
+        races_dict['WPMs'].append(players_wpms)
+        races_dict['Accuracies'].append(players_accs)
+        races_dict['TypingLogs'].append(players_tls)
+        races_dict['TextID'].append(textID)
+        
+        tl = players_tls[R['rank']-1]
+        if tl != '':
+            TL_ = parse_typinglog_simple(tl)
+            typedText = ''.join(TL_['Char'])
+        else:
+            typedText = ''
+
+        races_dict['TypedText'].append(typedText)
+        races_dict['TypingLog'].append(tl)
+
+        races_inds.append(race)
+    
+    if len(races_inds):
+        races_ = pd.DataFrame(races_dict, index=races_inds)
+
+        df: pd.DataFrame = pd.concat([df, races_])
+        df = adjust_dataframe_index(df)
+
+    return df
+
+
 ## READ HTML: RACES
 def populate_races(races, numToLoad=None):
     # First, get the total number of races
-    _, soup = read_url(url_user.format(USER))
-
     indsPrev = races.index
 
-    n_races = extract_num_races(soup)
+    n_races = extract_num_races(USER)
     racesMissing = get_missing_indices(races, n_races)
 
     if numToLoad is None:
@@ -146,7 +247,7 @@ def populate_racers(racers, races):
     # Check which races we have not loaded yet
     racesToLoad = get_missing_indices(racers, races)
 
-    races_dict = {c:[] for c in ['Race', 'DateTime', 'TextID', 'TypingLog']}
+    races_dict = {c:[] for c in ['Race', 'DateTime', 'TextID', 'TypedText', 'TypingLog']}
     racers_dict = {c:[] for c in racers.columns}
 
     for race in racesToLoad:
@@ -157,6 +258,10 @@ def populate_racers(racers, races):
             dt, textID, players, players_wpms, players_accs, players_tls = \
                 parse_race_self(soup)
             typingLog = players_tls[races.loc[race]['Rank'] - 1]
+            # Use typingLog to get the actual text shown to user
+            # This differs from the raw text found on the site
+            TL_ = parse_typinglog_simple(typingLog)
+            typedText = ''.join(TL_['Char'])
         except:
             print(f'\t...failed to parse race {race}. Skipping')
             continue
@@ -164,6 +269,7 @@ def populate_racers(racers, races):
         races_dict['Race'].append(race)
         races_dict['DateTime'].append(dt)
         races_dict['TextID'].append(textID)
+        races_dict['TypedText'].append(typedText)
         races_dict['TypingLog'].append(typingLog)
 
         racers_dict['Racers'].append(players)
@@ -296,12 +402,12 @@ def populate_texts(texts:pd.DataFrame, races:pd.DataFrame) -> pd.DataFrame:
 # texts - all texts found in given races
 
 
-if os.path.exists(FN_PKL_USER):
+# # if os.path.exists(FN_PKL_USER):
 # if False:
-    with open(FN_PKL_USER, 'rb') as f:
-        races, racers, typedata, texts = pickle.load(f)
-else:
-    races, racers, typedata, texts = init_dataframes()
+#     with open(FN_PKL_USER, 'rb') as f:
+#         races, racers, typedata, texts = pickle.load(f)
+# else:
+#     races, racers, typedata, texts = init_dataframes()
     
 
 if os.path.exists(FN_PKL_HTMLS):
@@ -313,12 +419,20 @@ else:
 
 
 #%%
+races = pd.DataFrame(dtype=int, 
+    columns=['DateTime', 'WPM', 'Accuracy', 'Points', 'Rank', 'NumRacers', 
+                'TextID', 'TypedText', 'TypingLog',
+                'Racers', 'WPMs', 'Accuracies', 'TypingLogs', ])
+
+races = populate_races_(races, 100)
+
+#%%
 ## RACES
-# races = populate_races(races)
-if races.empty:
-    races = populate_races(races, 400)
-else:
-    races = populate_races(races, 10)
+races = populate_races(races)
+# if races.empty:
+#     races = populate_races(races, 400)
+# else:
+#     races = populate_races(races, 10)
 
 if not races.index.is_monotonic_decreasing:
     print('Warning: Races is not monotonic decreasing')
@@ -342,46 +456,46 @@ texts = populate_texts(texts, races)
 # Create dataframe which contains the three typingLog dataframes for each race
 
 # Process typingLog
-for race in races.index:
-    textID = races.loc[race, 'TextID']
+# for race in races.index:
+#     textID = races.loc[race, 'TextID']
 
-    tl = races.loc[race, 'TypingLog']
-    text = texts.loc[textID, 'Text']
+#     tl = races.loc[race, 'TypingLog']
+#     text = texts.loc[textID, 'Text']
 
-    wpm = races.loc[race, 'WPM']
-    acc = races.loc[race, 'Accuracy']
+#     wpm = races.loc[race, 'WPM']
+#     acc = races.loc[race, 'Accuracy']
 
-    TL,C,W,_ = parse_typinglog(tl, text)
+#     TL,C,W,_ = parse_typinglog(tl, text)
 
-    wpm_, opt_t, opt_m = compute_wpm_best(C, wpm)
-    if np.abs(wpm_-wpm) < 0.01:
-        ye = '=='
-    else:
-        ye = 'x'
-    print(f'{race}\t{wpm:0.2f}\t{wpm_:0.2f}\t{ye}\t{opt_t:<12}\t{opt_m}')
+#     wpm_, opt_t, opt_m = compute_wpm_best(C, wpm)
+#     if np.abs(wpm_-wpm) < 0.01:
+#         ye = '=='
+#     else:
+#         ye = 'x'
+#     print(f'{race}\t{wpm:0.2f}\t{wpm_:0.2f}\t{ye}\t{opt_t:<12}\t{opt_m}')
 
 #%%
 ## UPDATE
 
 # Process typingLog
-for race in races.index:
-    textID = races.loc[race, 'TextID']
+# for race in races.index:
+#     textID = races.loc[race, 'TextID']
 
-    tl = races.loc[race, 'TypingLog']
-    text = texts.loc[textID, 'Text']
+#     tl = races.loc[race, 'TypingLog']
+#     text = texts.loc[textID, 'Text']
 
-    wpm = races.loc[race, 'WPM']
-    acc = races.loc[race, 'Accuracy']
+#     wpm = races.loc[race, 'WPM']
+#     acc = races.loc[race, 'Accuracy']
 
-    TL,C,W,_ = parse_typinglog(tl, text)
+#     TL,C,W,_ = parse_typinglog(tl, text)
 
-    acc_, opt_t, opt_m = compute_acc_best(C, acc)
-    if np.abs(acc_-acc) < 0.01:
-        ye = '=='
-    else:
-        ye = 'x'
-    print(f'{race}\t{acc:0.2f}\t{acc_:0.2f}\t{ye}\t{opt_t:<12}\t{opt_m}')
-    
+#     acc_, opt_t, opt_m = compute_acc_best(C, acc)
+#     if np.abs(acc_-acc) < 0.01:
+#         ye = '=='
+#     else:
+#         ye = 'x'
+#     print(f'{race}\t{acc:0.2f}\t{acc_:0.2f}\t{ye}\t{opt_t:<12}\t{opt_m}')
+
 
 #%%
 ## SAVE
