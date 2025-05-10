@@ -18,9 +18,7 @@ from time import time, sleep
 
 from parse_soup import *
 from typeracer_utils import *
-# from typing_analysis import *
-from typing_analysis_ import *
-# from typing_analysis_ import typinglog_pipe, parse_typinglog, parse_typinglog_complete, reconstruct_text_typinglog
+from typing_analysis import *
 
 
 #%%
@@ -49,13 +47,19 @@ def print_tl_df(TL):
 
 
 #%%
+# RACES OF NOTE
+
+## TEXT
 # Text with numbers (years) and parentheses
-ind = 7264
+# ind = 7264
 # With double quotes
 # ind = 7498
-
 # iive vs live
 # ind = 7541
+
+## MISTAKES
+# No Mistakes
+# 7506
 
 # ind = 7511
 
