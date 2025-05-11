@@ -19,6 +19,7 @@ from time import time, sleep
 from parse_soup import *
 from typeracer_utils import *
 from typing_analysis import *
+from TypeRacerUser import TypeRacerUser
 
 
 #%%
@@ -31,12 +32,9 @@ FN_PKL_USER = os.path.join(FH_PKL, f'typeracer_{USER}.pkl')
 FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
 
 try: 
-    races
+    userdata
 except:
-    with open(FN_PKL_USER, 'rb') as f:
-        races, racers, typedata, texts = pickle.load(f)
-    with open(FN_PKL_HTMLS, 'rb') as f:
-        htmls = pickle.load(f)
+    userdata = TypeRacerUser.load(FN_PKL_USER)
 
 
 #%%
@@ -72,6 +70,9 @@ ind = 6978
 
 ind = 6422
 
+# Unicode character was typed
+ind = 6047
+
 ind = 4201
 
 ind = 2776
@@ -92,12 +93,13 @@ ind = 821
 
 #%%
 
-inds = races.index
+inds = userdata.races.index
 # inds = np.random.choice(races.index, 300, replace=False)
 # inds = range(2500, 0, -1)
 # inds = range(races.index.max(), 2742, -1)
 # inds = [ind]
-inds = [2]
+# inds = [6047]
+# inds = np.concatenate([np.arange(7000, 6500, -1), np.arange(1000, 0, -1)])
 
 T_D = []
 MT = []
@@ -106,16 +108,10 @@ st = time()
 for race in inds:
     print(race)
 
-    textID = races.loc[race, 'TextID']
-
-    tl = races.loc[race, 'TypingLog']
-    # tl = races.loc[race, 'TypingLog']
-    text = races.loc[race, 'TypedText']
-    wpm = races.loc[race, 'WPM']
-    acc = races.loc[race, 'Accuracy']
-
-    # chars_total = texts.loc[textID, 'NumChars']
-    # words_total = texts.loc[textID, 'NumWords']
+    tl = userdata.races.loc[race, 'TypingLog']
+    text = userdata.races.loc[race, 'TypedText']
+    wpm = userdata.races.loc[race, 'WPM']
+    acc = userdata.races.loc[race, 'Accuracy']
 
     ####################
 
@@ -183,4 +179,69 @@ for race in inds:
 
 print(f'\t{ (time()-st):0.2f} secs')
 print(len(T_D), len(MT))
+
+
+#%%
+# Recreate keystrokes and windows
+inds = userdata.races.index
+# inds = np.concatenate([np.arange(7000, 6500, -1), np.arange(1000, 0, -1)])
+# inds = [6047]
+
+for race in inds:
+    print(race)
+    tl = userdata.races.loc[race, 'TypingLog']
+    
+    ind = typinglog_pipe(tl)
+    tl1 = tl[ind+1:]
+    
+    TL, S, W = parse_typinglog_complete(tl)
+    text_inds, num_strokes = parse_typinglog_wordvals(tl)
+
+    strokes = []
+    stroke_ms = []
+    window_num = []
+    windows = []
+
+    for w, Ww in TL.groupby('Window'):
+        window = ''
+
+        for _, Ss in Ww.groupby('Stroke'):
+            ms = Ss['Ms'].sum()
+
+            stroke = ''
+            for r in Ss.itertuples():
+                entry = f'{r.WindowInd}{r.Op}{r.Char}'
+                stroke += entry
+
+            strokes.append(stroke)
+            stroke_ms.append(ms)
+            window_num.append(w)
+
+            window += f'{ms},{stroke},'
+
+        windows.append(window[:-1])
+
+    S_ = pd.DataFrame({
+        'Stroke': strokes,
+        'Ms': stroke_ms,
+        'Window': window_num,
+    })
+    W_ = pd.DataFrame({
+        'Window': windows,
+        'NumStrokes': num_strokes,
+        'TextInd': text_inds,
+    })
+
+
+    W__ = pd.DataFrame({
+        'TextInd': W_['TextInd'],
+        'NumStrokes': W_['NumStrokes'],
+        'Window': W_['Window'],
+    })
+    tl1_ = ','.join(W__.astype(str).values.flatten()) + ','
+    tl1_ = ''.join([reverse_char_clean(c) for c in tl1_])
+    
+    assert(S.equals(S_))
+    assert(W.equals(W_))
+    assert(tl1 == tl1_)
 
