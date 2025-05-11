@@ -57,10 +57,33 @@ def text_to_sections(text: str, numSections: int=8) -> list[str]:
 # The typingLog contains two formats, separated by a pipe character
 # To account for the possiblity of a pipe in the text itself, search for a specific regex pattern
 #   i.e. pipe character followed by digits (first word index, should always be 0)
+def clean_typinglog(tl: str) -> str:
+    tl = tl.replace('\\\\', '\\')
+    tl = tl.replace('\\"', '"')
+
+    unicode_pattern = '\\\\u[0-9a-fA-F]{4}'
+    unicode_occurences = re.finditer(unicode_pattern, tl)
+    for unicode_occurence in unicode_occurences:
+        unicode_str = unicode_occurence.group()
+        tl = tl.replace(unicode_str, unicode_str.encode('utf-8').decode('unicode-escape'))
+
+    return tl
+
+def reverse_char_clean(c: str) -> str:
+    assert(len(c) == 1)
+    if c == '\\':
+        return '\\\\'
+    elif c == '"':
+        return '\\"'
+    else:
+        return c.encode('unicode-escape').decode('utf-8').replace('\\x', '\\u00')
+
+# The typingLog contains two formats, separated by a pipe character
+# To account for the possiblity of a pipe in the text itself, search for a specific regex pattern
+#   i.e. pipe character followed by digits (first word index, should always be 0)
 def typinglog_pipe(tl: str) -> int:
     pipe_pattern = r'\|\d+,'
     pipe_occurence = list(re.finditer(pipe_pattern, tl))
-    ind = pipe_occurence[-1].start()
 
     return pipe_occurence[-1].start()
 
@@ -254,6 +277,7 @@ def parse_typinglog_complete(tl:str):
     T = tl[typinglog_pipe(tl)+1:]
     # Do this to make regex better
     T = ',' + T[:-1]
+    T = clean_typinglog(T)
 
 
     ## WINDOWS
@@ -285,7 +309,12 @@ def parse_typinglog_complete(tl:str):
     # Use this pattern to separate out each keystroke
     #   Looking for the ms is more robust than finding keystrokes
     ms_pattern = r',-?\d+,'
-    char_pattern = r'(\d+)([+\-$])(\\"|.)'
+    char_pattern = r'(\d+)([+\-$])(.)'
+
+    # The string contains substrings of the form \u00e5
+    #   where the u is literal, and the following four characters are hexadecimal digits
+    #   this is a Unicode escape sequence
+    #   The regex for this is \\u[0-9a-fA-F]{4}
 
     # For each keystroke
     strokes, strokes_ms, window_nums = ([] for _ in range(3))
@@ -313,7 +342,7 @@ def parse_typinglog_complete(tl:str):
     # Each keystroke has this pattern
     #   ,({ind}{op}{char})+,
     # * "ind" is the "window_ind", or the index in the window being typed
-    char_pattern = r'(\d+)([+\-$])(\\"|.)'
+    char_pattern = r'(\d+)([+\-$])(.)'
 
     window_inds, chars, ops, char_ms, window_nums, stroke_nums, stroke_inds = \
         ([] for _ in range(7))
@@ -338,7 +367,7 @@ def parse_typinglog_complete(tl:str):
             char_ind = int(char_ind_)
 
             # The "character" found with regex can be \" (two characters), so take the last index
-            chars.append(char[-1])
+            chars.append(char)
             ops.append(op)
             # This is "purportly" the index within the full window
             # ! This is from typingLog, so can be buggy!
@@ -358,6 +387,131 @@ def parse_typinglog_complete(tl:str):
 
     TL = pd.DataFrame({'Window': window_nums, 'WindowInd': window_inds, 'Char': chars, 'Op': ops, 'Ms': char_ms, 'Stroke': stroke_nums, 'StrokeInd': stroke_inds})
     return TL, S, W
+
+
+# Parse the second half of typingLog
+#   This contains *all* the keystrokes
+def parse_typinglog_complete_(tl:str):
+    T = tl[typinglog_pipe(tl)+1:]
+    # Do this to make regex better
+    T = ',' + T[:-1]
+    T = clean_typinglog(T)
+
+
+    ## WINDOWS
+
+    # Split into windows
+    wordnums_pattern = r',(\d+),(\d+),'
+    # This makes it so regex matches are all unique (no overlaps)
+    wordnums_pattern_ = wordnums_pattern.replace('(', '').replace(')', '')
+
+    # Each window starts with \d,\d
+    wordnums = re.findall(wordnums_pattern, T)
+    # These are the indices in the original text and the number of strokes per window
+    text_inds, num_strokes = zip(*wordnums)
+    text_inds = [int(i) for i in text_inds]
+    num_strokes = [int(i) for i in num_strokes]
+
+    # Get the keystrokes per window
+    windows = re.split(wordnums_pattern_, T)[1:]
+    # * Implicity checks for equality of length (windows processed correctly)
+    # W = pd.DataFrame({'Window': windows, 'NumStrokes': num_strokes, 'TextInd': text_inds})
+
+
+    ## KEYSTROKES
+
+    # Each window now comprises of multiple keystrokes
+    # Each keystroke is comprised of one or more entries
+    # Each entry has this pattern
+    #   ,{ms},{kestroke},
+    # Use this pattern to separate out each keystroke
+    #   Looking for the ms is more robust than finding keystrokes
+    ms_pattern = r',-?\d+,'
+    char_pattern = r'(\d+)([+\-$])(.)'
+
+    # For each keystroke
+    # strokes, strokes_ms, window_nums = ([] for _ in range(3))
+
+    window_inds, chars, ops, char_ms, window_nums, stroke_nums, stroke_inds = \
+        ([] for _ in range(7))
+
+    ss = -1
+    ee = -1
+
+    # for w in W.itertuples():
+    for w in range(len(windows)):
+        # For regex robustness
+        window_ = ',' + windows[w]
+        ms_vals = re.findall(ms_pattern, window_)
+        keystrokes = re.split(ms_pattern, window_)[1:]
+
+        # Window contains multiple keystrokes
+        for s, (ms_, stroke) in enumerate(zip(ms_vals, keystrokes)):
+            ss += 1
+            ms = int(ms_[1:-1])
+
+            entries = re.findall(char_pattern, stroke)
+            num_entries = len(entries)
+            assert(num_entries > 0)
+
+            # NOTE: Two ways of saving ms for keystrokes w multiple entries
+            # 1. First entry gets the whole ms, other entries get 0
+            ms = int(ms_[1:-1])
+
+            # This is which stroke (from the strokes DataFrame) the entry(ies) come from
+            stroke_num = ss
+            # This is the window that the stroke came from
+            window_num = w
+
+            # # 2. Divide between number of entries
+            # ms = s.Ms / num_entries
+
+            for i, (char_ind_, op, char) in enumerate(entries):
+                ee += 1
+                char_ind = int(char_ind_)
+
+                # The "character" found with regex can be \" (two characters), so take the last index
+                chars.append(char)
+                ops.append(op)
+                # This is "purportly" the index within the full window
+                # ! This is from typingLog, so can be buggy!
+                window_inds.append(char_ind)
+                
+                char_ms.append(ms)
+
+                stroke_nums.append(stroke_num)
+                # Individual entry's index in the stroke
+                stroke_inds.append(i)
+
+                window_nums.append(window_num)
+                
+                # Only save the ms once (to avoid double-dipping)
+                # Only relevant to first way of saving Ms (see above)
+                ms = 0
+
+            # strokes.append(stroke)
+            # strokes_ms.append(ms)
+            # window_nums.append(w)
+
+    # S = pd.DataFrame({'Stroke': strokes, 'Ms': strokes_ms, 'Window': window_nums})
+
+
+    ## ENTRIES
+
+    # Entry(ies) can be found in each keystroke
+    # Each keystroke has this pattern
+    #   ,({ind}{op}{char})+,
+    # * "ind" is the "window_ind", or the index in the window being typed
+
+
+    # for s in S.itertuples():
+
+
+
+
+    TL = pd.DataFrame({'Window': window_nums, 'WindowInd': window_inds, 'Char': chars, 'Op': ops, 'Ms': char_ms, 'Stroke': stroke_nums, 'StrokeInd': stroke_inds})
+    # return TL, S, W
+    return TL, 0, 0
 
 
 # The typingLog contains some keystrokes consisting of multiple entries
@@ -473,6 +627,7 @@ def parse_typinglog_simple(tl:str) -> pd.DataFrame:
     T = tl[:typinglog_pipe(tl)]
     # Skip "header" inforamtion
     T = T.split(',', 3)[-1]
+    T =  clean_typinglog(T)
 
     ms = []
     chars = []
