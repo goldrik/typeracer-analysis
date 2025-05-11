@@ -175,7 +175,10 @@ class TypeRacerUser:
         if len(races_inds):
             races_ = pd.DataFrame(races_dict, index=races_inds)
 
-            self.races = pd.concat([self.races, races_])
+            if len(self.races):
+                self.races = pd.concat([self.races, races_])
+            else:
+                self.races = races_
             self.races = adjust_dataframe_index(self.races)
     
 
@@ -336,6 +339,7 @@ class TypeRacerUser:
                 n_races, lastRaceLoaded=results_.index.min(), currentPageSoup=soup)
 
         self.results = self.results.loc[indsAfter].copy()
+        # TODO This prints "0 duplicate rows" even when no results loaded
         self.results = adjust_dataframe_index(self.results)
 
 
@@ -372,6 +376,36 @@ class TypeRacerUser:
         # Otherwise, start from the date (right after) the missing race
         search_date = next_day_to_str(self.results.loc[ind+1, 'Date'])
         return url_races.format(self.user, numRacesToLoad, search_date)
+
+
+    def save(self, obj_pkl):
+        # If we have an htmls pkl file, save those to a separate file, 
+        #   not as part of the TypeRacerUser obj
+        # Otherwise, just save everthing together
+        save_htmls = self.htmls_pkl is None
+
+        if not save_htmls:
+            self.save_htmls()
+            self.htmls = {}
+        
+        with open(obj_pkl, 'wb') as f:
+            pickle.dump(self, f)
+
+        if not save_htmls:
+            self.load_htmls() 
+
+
+    @staticmethod
+    def load(obj_pkl):
+        if os.path.exists(obj_pkl):
+            with open(obj_pkl, 'rb') as f:
+                obj = pickle.load(f)
+        else:
+            raise Exception(f'ERROR: {obj_pkl} file does not exist')
+        
+        obj.load_htmls()
+        return obj
+        
 
 
     def method1(self, arg1):
