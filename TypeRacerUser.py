@@ -7,6 +7,7 @@ import os
 
 from typeracer_utils import *
 from parse_soup import *
+from TypingLog import TypingLog
 from url_formatstrings import url_base, url_user, url_races, url_race, url_text
 
 _profile_attrs = [
@@ -77,7 +78,8 @@ class TypeRacerUser:
         self.populate_races(num_load=num_races)
         self.populate_racers()
         self.populate_texts()
-        self.save_htmls()
+        if self.htmls_pkl is not None:
+            self.save_htmls()
 
     
     def load_htmls(self, htmls_pkl=None):
@@ -103,7 +105,7 @@ class TypeRacerUser:
             with open(htmls_pkl, 'wb') as f:
                 pickle.dump(self.htmls, f)
         else: 
-            raise Exception('ERROR: htmls were not saved, htmls_pkl class variable not set')
+            print('WARNING: htmls were not saved, htmls_pkl class variable not set')
     
 
     def populate_profile(self):
@@ -162,8 +164,7 @@ class TypeRacerUser:
             self._opponents[race] = {'Names': O['Users'], 'Races': O['Races'], 'Ranks': O['Ranks']}
             
             if tl:
-                TL_ = parse_typinglog_simple(tl)
-                typedText = ''.join(TL_['Char'])
+                typedText = TypingLog(tl).generate_text()
             else:
                 typedText = ''
 
@@ -180,6 +181,8 @@ class TypeRacerUser:
             else:
                 self.races = races_
             self.races = adjust_dataframe_index(self.races)
+
+        return self.races
     
 
     # This is dependent on the races dataframe
@@ -208,6 +211,8 @@ class TypeRacerUser:
 
             self.racers = pd.concat([self.racers, racers_])
             self.racers = adjust_dataframe_index(self.racers)
+
+        return self.racers
     
 
     # For a single race
@@ -307,6 +312,8 @@ class TypeRacerUser:
         for textID in self.texts.index:
             self.texts.at[textID, 'Races'] = self.races[self.races['TextID'] == textID].index.tolist()
 
+        return self.texts
+
 
     def populate_results(self, num_load=None):
         # First, get the total number of races
@@ -341,6 +348,8 @@ class TypeRacerUser:
         self.results = self.results.loc[indsAfter].copy()
         # TODO This prints "0 duplicate rows" even when no results loaded
         self.results = adjust_dataframe_index(self.results)
+
+        return self.results
 
 
     # Given the list of loaded races and list of races to load
@@ -406,17 +415,3 @@ class TypeRacerUser:
         obj.load_htmls()
         return obj
         
-
-
-    def method1(self, arg1):
-        """
-        A brief description of method1.
-
-        Input:
-            arg1 (type): Description of arg1.
-
-        Ouptut:
-            type: Description of the return value.
-        """
-        # Method implementation
-        pass
