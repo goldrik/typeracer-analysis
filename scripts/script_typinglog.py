@@ -20,6 +20,7 @@ from parse_soup import *
 from typeracer_utils import *
 from typing_analysis import *
 from TypeRacerUser import TypeRacerUser
+from TypingLog import TypingLog
 
 
 #%%
@@ -95,10 +96,13 @@ ind = 821
 
 inds = userdata.races.index
 # inds = np.random.choice(races.index, 300, replace=False)
+
 # inds = range(2500, 0, -1)
-# inds = range(races.index.max(), 2742, -1)
+# inds = range(userdata.races.index.max(), 2742, -1)
+
 # inds = [ind]
-# inds = [6047]
+# inds = [2747]
+
 # inds = np.concatenate([np.arange(7000, 6500, -1), np.arange(1000, 0, -1)])
 
 T_D = []
@@ -115,35 +119,24 @@ for race in inds:
 
     ####################
 
-    assert(tl.count('|') == 1)
-    assert(tl[typinglog_pipe(tl)+1] == '0')
+    T = TypingLog(tl)
+    
+    T.generate()
+    T.parse_chars()
+
+    TL0 = T._chars
+    TL = T.entries
+    C = T.chars
+    W = T.words
+    text_ = T.text
 
     ####################
 
-    TL0 = parse_typinglog_simple(tl)
-    # TL = parse_typinglog_complete(tl)[0]
-    # text_, tp = reconstruct_text_typinglog(TL)
-
-
-    # lc, fo = [], []
-    # for _,W in TL.groupby('Window'):
-    #     lc.append(W.iloc[-1]['Char'])
-    #     fo.append(W.iloc[0]['Op'])
-    # lc = np.array(lc)
-    # fo = np.array(fo)
-    # if ~np.all(lc[:-1] == ' '):
-    #     print('\tThere was a window that didnt end with space')
-    # if ~np.all(fo == '+'):
-    #     print('\tThere was a window that didnt start with an addition')
-
-    # a = time()
-    TL, C, W, text_  = \
-        parse_typinglog(tl)
-    # print(f'\t{ (time()-a)*1e3:0.2f} ms')
-
-
+    assert(tl.count('|') == 1)
+    assert(T._tl[1][0] == '0')
 
     # assert(len(tp)-1 == TL['Stroke'].iloc[-1])
+    assert(''.join(C['Char']) == ''.join(TL0['Char']))
     assert(text_ == text)
 
     
@@ -181,7 +174,9 @@ print(f'\t{ (time()-st):0.2f} secs')
 print(len(T_D), len(MT))
 
 
+
 #%%
+raise Exception
 # Recreate keystrokes and windows
 inds = userdata.races.index
 # inds = np.concatenate([np.arange(7000, 6500, -1), np.arange(1000, 0, -1)])
