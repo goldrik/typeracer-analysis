@@ -24,7 +24,7 @@ from url_formatstrings import url_user
 #   Option: Save html to dictionary so to prevent repeat loading
 def read_url(wp:str, htmlDict:dict=None, reloadHtml=False, 
              useSelenium:bool=False, driver:webdriver.Chrome=None) -> str:
-    print(wp)
+    # print(wp)
 
     # TODO handle case where loaded HTML (in dict) was not loaded with selenium
     if not reloadHtml and htmlDict is not None:
@@ -168,15 +168,3 @@ def get_missing_indices(indsThis, indsRef=None) -> np.ndarray:
     inds = list( set(indsRef) - set(indsThis) )
     return np.sort(np.array(inds))[::-1]
 
-
-# Ensure dataframes dont have duplicate rows (by index) and are ordered in decending order
-def adjust_dataframe_index(df:pd.DataFrame, sortDesc:bool=True) -> pd.DataFrame:
-    duplicate_inds = df.index.duplicated(keep='first')
-    print(f'Dropping {duplicate_inds.sum()} duplicate rows')
-    df = df[~duplicate_inds].copy()
-
-    # Dataframe should start from the most recent race
-    if sortDesc:
-        df.sort_index(ascending=False, inplace=True)
-    
-    return df
