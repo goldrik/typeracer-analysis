@@ -120,7 +120,7 @@ for race in inds:
     ####################
 
     T = TypingLog(tl)
-    
+
     T.generate()
     T.parse_chars()
 
@@ -176,21 +176,30 @@ print(len(T_D), len(MT))
 
 
 #%%
-raise Exception
 # Recreate keystrokes and windows
 inds = userdata.races.index
 # inds = np.concatenate([np.arange(7000, 6500, -1), np.arange(1000, 0, -1)])
-# inds = [6047]
+# inds = [7511]
 
 for race in inds:
     print(race)
     tl = userdata.races.loc[race, 'TypingLog']
+
+    T = TypingLog(tl)
+    T.generate()
+    T.parse_chars()
+
+    tl_header = tl[:[ind for ind, c in enumerate(tl) if c == ','][2]]
     
-    ind = typinglog_pipe(tl)
-    tl1 = tl[ind+1:]
-    
-    TL, S, W = parse_typinglog_complete(tl)
-    text_inds, num_strokes = parse_typinglog_wordvals(tl)
+    TL0 = T._chars
+    TL = T.entries
+    C = T.chars
+    W = T.words
+
+    S = T.strokes
+    WW = T.windows
+    text_inds = WW['TextInd']
+    num_strokes = WW['NumStrokes']
 
     strokes = []
     stroke_ms = []
@@ -234,9 +243,27 @@ for race in inds:
         'Window': W_['Window'],
     })
     tl1_ = ','.join(W__.astype(str).values.flatten()) + ','
-    tl1_ = ''.join([reverse_char_clean(c) for c in tl1_])
+    tl0_ = ''
+    # for r in TL0.itertuples():
+    #     c = r.Char
+    #     if c.isdigit() or c == '-':
+    #         c = '\\b' + str(c)
+    #     tl0_ += c + str(r.Ms)
+
+    def convertC(c):
+        if c.isdigit() or c == '-':
+            return '\\b' + c 
+        else:
+            return TypingLog.reverse_char_clean(c)
+    tl0_ = ''.join(TL0['Char'].apply(convertC) + TL0['Ms'].apply(str))
+    
+    # tl0_ = ''.join([TypingLog.reverse_char_clean(c) for c in tl0_])
+    tl1_ = ''.join([TypingLog.reverse_char_clean(c) for c in tl1_])
+
+    tl_ = tl_header + ',' + tl0_ + '|' + tl1_
     
     assert(S.equals(S_))
-    assert(W.equals(W_))
-    assert(tl1 == tl1_)
+    assert(WW.equals(W_))
+    # assert(tl1 == tl1_)
+    assert(tl == tl_)
 
