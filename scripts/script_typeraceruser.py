@@ -23,13 +23,19 @@ from TypeRacerUser import TypeRacerUser
 
 
 #%%
+# Test loading TypeRacerUser totally new (don't save)
+fresh = True
+
 ## ENV VARS
 dotenv.load_dotenv()
 USER: str = os.getenv('USER')
 FH_PKL: str = os.getenv('FH_PKL')
 
 FN_PKL_USER = os.path.join(FH_PKL, f'typeracer_{USER}.pkl')
-FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
+if fresh:
+    FN_PKL_HTMLS = None
+else:
+    FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
 
 #%%
 ## LOAD
@@ -43,12 +49,13 @@ except:
 ## LOAD
 # Make sure it has the htmls loaded
 userdata.load_htmls()
-userdata.update()
-# userdata.update(10)
+# userdata.update()
+# userdata.update(1)
 
-userdata.populate_results()
+# userdata.populate_results()
 
 
 #%%
 ## SAVE
-userdata.save(FN_PKL_USER)
+if not fresh:
+    userdata.save(FN_PKL_USER)
