@@ -53,6 +53,10 @@ class TypingLog:
         # Full typinglog string
         self.tl = tl
 
+        # Get header
+        # The substring preceding the third comma
+        self.header = tl[:[ind for ind, c in enumerate(tl) if c == ','][2]]
+
         # For internal use
         # Separates the typingLog into its two parts (separated by a pipe character)
         # "Cleans" the string for escaped characters (\\, \", unicode)
@@ -60,9 +64,6 @@ class TypingLog:
         self._tl = [ TypingLog.clean_typinglog(_tl) for _tl in 
                            [tl[:ind], tl[ind+1:]] ]
         
-        # Get header
-        # The substring preceding the third comma
-        self.header = tl[:[ind for ind, c in enumerate(tl) if c == ','][2]]
 
     
     # This generates the entries DataFrame and the two "output" DataFrames (chars and words)
@@ -381,7 +382,6 @@ class TypingLog:
         return self._chars
 
 
-
     # From the typingLog (first half, with characters), generate the original text
     def generate_text(self):
         if not self.chars.empty:
@@ -392,6 +392,37 @@ class TypingLog:
             self.parse_chars()
             DF = self._chars
         return ''.join(DF['Char'])
+
+
+    # FOR DEBUG ONLY: Recreate the original typingLog string using the DataFrames (_char and words)
+    def regenerate_typinglog(self):
+        if self.words.empty:
+            self.generate()
+        if self._chars.empty:
+            self.parse_chars()
+
+        # Just rearrange columns to make string generation easier
+        W = pd.DataFrame({
+            'TextInd': self.words['TextInd'],
+            'NumStrokes': self.words['NumStrokes'],
+            'Window': self.words['Window'],
+        })
+        # SECOND HALF
+        tl1 = ','.join(W.astype(str).values.flatten()) + ','
+
+        # Special function to convert characters for first half of typinglog
+        #   \b is prepended to certain characters
+        #   Perform unicode conversion if needed
+        def convert_char_tl0(c):
+            if c.isdigit() or c == '-':
+                return '\\b' + c 
+            else:
+                return TypingLog.reverse_char_clean(c)
+        # FIRST HALF
+        tl0 = ''.join(self._chars['Char'].apply(convert_char_tl0) + self._chars['Ms'].apply(str))
+        tl1 = ''.join([TypingLog.reverse_char_clean(c) for c in tl1])
+
+        return self.header + ',' + tl0 + '|' + tl1
 
 
     # Purely to remove unnecessary dataframes to reduce memory usage
