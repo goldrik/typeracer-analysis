@@ -56,9 +56,13 @@ class TypingLog:
         # For internal use
         # Separates the typingLog into its two parts (separated by a pipe character)
         # "Cleans" the string for escaped characters (\\, \", unicode)
-        ind = TypingLog.typinglog_pipe()
+        ind = TypingLog.typinglog_pipe(tl)
         self._tl = [ TypingLog.clean_typinglog(_tl) for _tl in 
                            [tl[:ind], tl[ind+1:]] ]
+        
+        # Get header
+        # The substring preceding the third comma
+        self.header = tl[:[ind for ind, c in enumerate(tl) if c == ','][2]]
 
     
     # This generates the entries DataFrame and the two "output" DataFrames (chars and words)
@@ -245,8 +249,8 @@ class TypingLog:
     # Parse the second half of typingLog
     #   This contains *all* the keystrokes
     def parse_entries(self):
-        # Do this to make regex better
-        T = ',' + self._tl[1]
+        # Do this to make regex better (and remove extra comma at end of typingLog)
+        T = ',' + self._tl[1][:-1]
 
 
         ## WINDOWS
