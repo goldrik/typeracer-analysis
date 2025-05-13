@@ -73,9 +73,9 @@ class TypeRacerUser:
         self._opponents = {}
 
     
-    def update(self, num_races=1e12):
+    def update(self, num_races=1e12, races=None):
         self.populate_profile()
-        self.populate_races(num_load=num_races)
+        self.populate_races(num_load=num_races, inds_load=races)
         self.populate_racers()
         self.populate_texts()
         if self.htmls_pkl is not None:
@@ -109,9 +109,14 @@ class TypeRacerUser:
     
 
     def populate_profile(self):
-        # Do not use htmls dict here, this should always be reloaded
+        # Do not use htmls dict here, this should always be reloaded to get latest information
         url = url_user.format(self.user)
-        soup = read_url(url)[1]
+        try:
+            soup = read_url(url)[1]
+        except:
+            print(f'Failed to read profile. TypeRacerUser object instantiation likely failed, though you may still attempt to load races')
+            print(f'\t{url}')
+            return
         
         info = parse_profile_info(soup)
         stats = parse_profile_stats(soup)
@@ -139,9 +144,9 @@ class TypeRacerUser:
         races_inds = []
         for race in races_load:
             # LOAD PAGE
-            wp = url_race.format(self.user, race)
+            url = url_race.format(self.user, race)
             try:
-                _, soup = read_url(wp, self.htmls, reloadHtml=self.reload)
+                _, soup = read_url(url, self.htmls, reloadHtml=self.reload)
 
                 # TEXT ID
                 textID = extract_textid(soup)
@@ -151,6 +156,8 @@ class TypeRacerUser:
                 tl = extract_typing_log(soup)
 
             except:
+                print('Failed to load Race', race)
+                print(f'\t{url}')
                 continue
 
             races_dict['DateTime'].append(R['Date'])
@@ -180,7 +187,9 @@ class TypeRacerUser:
                 self.races = pd.concat([self.races, races_])
             else:
                 self.races = races_
-            self.races = adjust_dataframe_index(self.races)
+
+            TypeRacerUser._print_loaded(races_load, races_inds)
+            self.races = TypeRacerUser._adjust_dataframe_index(self.races)
 
         return self.races
     
@@ -197,6 +206,9 @@ class TypeRacerUser:
             try:
                 players = self.extract_racers(race)
             except:
+                print('Failed to load racers for Race', race)
+                url = url_race.format(self.user, race)
+                print(f'\t{url}')
                 continue
 
             racers_dict['Racers'].append( players['Users'] )
@@ -210,7 +222,9 @@ class TypeRacerUser:
             racers_ = pd.DataFrame(racers_dict, index=racers_inds)
 
             self.racers = pd.concat([self.racers, racers_])
-            self.racers = adjust_dataframe_index(self.racers)
+
+            TypeRacerUser._print_loaded(racers_load, racers_inds)
+            self.racers = TypeRacerUser._adjust_dataframe_index(self.racers)
 
         return self.racers
     
@@ -283,10 +297,13 @@ class TypeRacerUser:
         for textID in self.races['TextID']:
             # Check if we've loaded this text before
             if (textID not in self.texts.index) and (textID not in textIDs):
+                url = url_text.format(textID)
                 try:
-                    _, soup = read_url(url_text.format(textID), self.htmls)
+                    _, soup = read_url(url, self.htmls)
                     T = parse_text(soup)
                 except:
+                    print('Failed to load Text', textID)
+                    print(f'\t{url}')
                     continue
 
                 texts_dict['Text'].append(T['text'])
@@ -306,7 +323,7 @@ class TypeRacerUser:
             texts_ = pd.DataFrame(texts_dict, index=textIDs)
             self.texts = pd.concat([self.texts, texts_])
 
-            self.texts = adjust_dataframe_index(self.texts, sortDesc=False)
+            self.texts = TypeRacerUser._adjust_dataframe_index(self.texts, sort_desc=False)
 
         # Update races (for each text)
         for textID in self.texts.index:
@@ -329,25 +346,26 @@ class TypeRacerUser:
         # This is what the dataframe indices should be afterwards
         indsAfter = np.array(list(set(indsPrev) | set(racesToLoad)))
 
-        wp = self._get_next_results_url( racesToLoad, n_races)
+        url = self._get_next_results_url( racesToLoad, n_races)
 
-        while wp != '': 
+        while url != '': 
             try:
-                _, soup = read_url(wp)
+                _, soup = read_url(url)
             except:
-                print(f'\t...failed to read webpage. Stop loading races')
+                print(f'Failed to read webpage. Results loading halted')
+                print(f'\t{url}')
                 break
             
             results_ = parse_results(soup)
             results_ = results_.rename(columns={'Speed':'WPM', 'Place':'Rank'})
             self.results = pd.concat([self.results, results_])
 
-            wp = self._get_next_results_url(racesToLoad, 
+            url = self._get_next_results_url(racesToLoad, 
                 n_races, lastRaceLoaded=results_.index.min(), currentPageSoup=soup)
 
         self.results = self.results.loc[indsAfter].copy()
         # TODO This prints "0 duplicate rows" even when no results loaded
-        self.results = adjust_dataframe_index(self.results)
+        self.results= TypeRacerUser._adjust_dataframe_index(self.results)
 
         return self.results
 
@@ -385,6 +403,31 @@ class TypeRacerUser:
         # Otherwise, start from the date (right after) the missing race
         search_date = next_day_to_str(self.results.loc[ind+1, 'Date'])
         return url_races.format(self.user, numRacesToLoad, search_date)
+    
+
+
+    # Ensure dataframes dont have duplicate rows (by index) and are ordered in decending order
+    def _adjust_dataframe_index(df:pd.DataFrame, sort_desc:bool=True) -> pd.DataFrame:
+        duplicate_inds = df.index.duplicated(keep='first')
+        num_dups = duplicate_inds.sum()
+        df = df[~duplicate_inds].copy()
+
+        # Dataframe should start from the most recent race
+        if sort_desc:
+            df.sort_index(ascending=False, inplace=True)
+        
+        if num_dups:
+            print(f'\tRemoved {num_dups} duplicate rows')
+
+        return df
+
+    # Ensure dataframes dont have duplicate rows (by index) and are ordered in decending order
+    def _print_loaded(racesToLoad:list, racesLoaded:list):
+        numToLoad = len(racesToLoad)
+        racesNotLoaded = list(set(racesToLoad) - set(racesLoaded))
+        print(f'Loaded {len(racesLoaded)} / {numToLoad} races')
+        # if len(racesNotLoaded):
+        #     print(f'\t{len(racesNotLoaded)} races failed to load: {racesNotLoaded}')
 
 
     def save(self, obj_pkl):
