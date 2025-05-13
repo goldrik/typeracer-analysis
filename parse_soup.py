@@ -24,7 +24,6 @@ import re
 
 from bs4 import BeautifulSoup
 from typeracer_utils import str_to_datetime
-from typing_analysis import parse_typinglog_simple
 
 
 ##
@@ -244,7 +243,7 @@ def parse_text(soup:BeautifulSoup) -> dict:
     text_details['accuracy'] = \
         float(soup.find('th', string='Avg. accuracy:').find_next_sibling('td').text.strip()[:-1])
 
-    text_parts = [text.strip() for text in text_info.text.split('\n')]
+    text_parts = [text.strip() for text in text_info.text.split('\n') if text.strip()]
 
     # NOTE: Text in the raw HTML may include double-spaces (for some reason)
     # Eliminate these (and any other possible multi-spaces)
@@ -253,9 +252,14 @@ def parse_text(soup:BeautifulSoup) -> dict:
     text_ = ' '.join([w for w in text_.split(' ') if w != ''])
     text_details['text'] = text_
 
-    text_details['title'] = text_info.find('a').text.strip()
-    text_details['type'] = text_parts[-3][1:-1]
-    text_details['author'] = text_parts[-2][3:]
+    
+    try:
+        text_details['title'] = text_info.find('a').text.strip()
+    except:
+        text_details['title'] = ''
+    
+    text_details['type'] = text_parts[-2][1:-1]
+    text_details['author'] = text_parts[-1][3:]
 
     submitter_td = soup.find('td', string='Submitted by:')
     if submitter_td is not None:
