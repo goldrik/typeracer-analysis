@@ -424,8 +424,9 @@ class TypeRacerUser:
     # Ensure dataframes dont have duplicate rows (by index) and are ordered in decending order
     def _print_loaded(racesToLoad:list, racesLoaded:list):
         numToLoad = len(racesToLoad)
-        racesNotLoaded = list(set(racesToLoad) - set(racesLoaded))
         print(f'Loaded {len(racesLoaded)} / {numToLoad} races')
+        
+        racesNotLoaded = list(set(racesToLoad) - set(racesLoaded))
         # if len(racesNotLoaded):
         #     print(f'\t{len(racesNotLoaded)} races failed to load: {racesNotLoaded}')
 
