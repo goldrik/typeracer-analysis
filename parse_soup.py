@@ -254,7 +254,10 @@ def parse_text(soup:BeautifulSoup) -> dict:
 
     
     try:
-        text_details['title'] = text_info.find('a').text.strip()
+        # text_details['title'] = text_info.find('a').text.strip()
+        # Update: 30 May 2025
+        #   Typeracer update to text info pages, removed text hyperlink
+        text_details['title'] = text_parts[-3]
     except:
         text_details['title'] = ''
     
