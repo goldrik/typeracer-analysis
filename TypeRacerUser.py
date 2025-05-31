@@ -4,6 +4,7 @@
 import pandas as pd
 import pickle
 import os
+from time import time
 
 from typeracer_utils import *
 from parse_soup import *
@@ -139,6 +140,7 @@ class TypeRacerUser:
 
         races_load = get_missing_indices(self.races, inds_load)
         races_load = races_load[:int(num_load)]
+        P = self._print_loaded(races_load, 'races')
 
         races_dict = {c:[] for c in self.races.columns}
         races_inds = []
@@ -179,6 +181,8 @@ class TypeRacerUser:
             races_dict['TypingLog'].append(tl)
 
             races_inds.append(race)
+            P.update()
+        P.done()
         
         if len(races_inds):
             races_ = pd.DataFrame(races_dict, index=races_inds)
@@ -188,7 +192,7 @@ class TypeRacerUser:
             else:
                 self.races = races_
 
-            TypeRacerUser._print_loaded(races_load, races_inds)
+            # TypeRacerUser._print_loaded(races_load, races_inds, 'races')
             self.races = TypeRacerUser._adjust_dataframe_index(self.races)
 
         return self.races
@@ -199,6 +203,7 @@ class TypeRacerUser:
     def populate_racers(self):
         # First, determine which races need to be loaded
         racers_load = get_missing_indices(self.racers, self.races)
+        P = self._print_loaded(racers_load, 'opponents')
 
         racers_dict = {c:[] for c in self.racers.columns}
         racers_inds = []
@@ -217,13 +222,15 @@ class TypeRacerUser:
             racers_dict['TypingLogs'].append( players['TLs'] )
 
             racers_inds.append(race)
+            P.update()
+        P.done()
         
         if len(racers_inds):
             racers_ = pd.DataFrame(racers_dict, index=racers_inds)
 
             self.racers = pd.concat([self.racers, racers_])
 
-            TypeRacerUser._print_loaded(racers_load, racers_inds)
+            # TypeRacerUser._print_loaded(racers_load, racers_inds, 'races (opponents)')
             self.racers = TypeRacerUser._adjust_dataframe_index(self.racers)
 
         return self.racers
@@ -293,36 +300,43 @@ class TypeRacerUser:
     #   avoids re-reading text if already found in texts
     def populate_texts(self):
         texts_dict = {c:[] for c in self.texts.columns if c != 'Races'}
+
+        # Find texts which havent been loaded, and remove duplicates
+        texts_load = [x for x in self.races['TextID'] if x not in self.texts.index]
+        texts_load = list(dict.fromkeys(texts_load))
+        P = self._print_loaded(texts_load, 'texts')
+        
         textIDs = []
-        for textID in self.races['TextID']:
-            # Check if we've loaded this text before
-            if (textID not in self.texts.index) and (textID not in textIDs):
-                url = url_text.format(textID)
-                try:
-                    _, soup = read_url(url, self.htmls)
-                    T = parse_text(soup)
-                except:
-                    print('Failed to load Text', textID)
-                    print(f'\t{url}')
-                    continue
+        for textID in texts_load:
+            url = url_text.format(textID)
+            try:
+                _, soup = read_url(url, self.htmls)
+                T = parse_text(soup)
+            except:
+                print('Failed to load Text', textID)
+                print(f'\t{url}')
+                continue
 
-                texts_dict['Text'].append(T['text'])
-                texts_dict['Title'].append(T['title'])
-                texts_dict['Type'].append(T['type'])
-                texts_dict['Author'].append(T['author'])
-                texts_dict['Submitter'].append(T['submitter'])
-                texts_dict['WPM'].append(T['wpm'])
-                texts_dict['Accuracy'].append(T['accuracy'])
+            texts_dict['Text'].append(T['text'])
+            texts_dict['Title'].append(T['title'])
+            texts_dict['Type'].append(T['type'])
+            texts_dict['Author'].append(T['author'])
+            texts_dict['Submitter'].append(T['submitter'])
+            texts_dict['WPM'].append(T['wpm'])
+            texts_dict['Accuracy'].append(T['accuracy'])
 
-                texts_dict['NumWords'].append( len(T['text'].split(' ')) )
-                texts_dict['NumChars'].append( len(T['text']) )
+            texts_dict['NumWords'].append( len(T['text'].split(' ')) )
+            texts_dict['NumChars'].append( len(T['text']) )
 
-                textIDs.append(int(textID))
+            textIDs.append(int(textID))
+            P.update()
+        P.done()
 
         if len(textIDs):
             texts_ = pd.DataFrame(texts_dict, index=textIDs)
             self.texts = pd.concat([self.texts, texts_])
 
+            # TypeRacerUser._print_loaded(textIDs, texts_load, 'texts')
             self.texts = TypeRacerUser._adjust_dataframe_index(self.texts, sort_desc=False)
 
         # Update races (for each text)
@@ -421,14 +435,51 @@ class TypeRacerUser:
 
         return df
 
-    # Ensure dataframes dont have duplicate rows (by index) and are ordered in decending order
-    def _print_loaded(racesToLoad:list, racesLoaded:list):
-        numToLoad = len(racesToLoad)
-        print(f'Loaded {len(racesLoaded)} / {numToLoad} races')
+    # # Ensure dataframes dont have duplicate rows (by index) and are ordered in decending order
+    # def _print_loaded(racesToLoad:list, racesLoaded:list, whatLoaded:str='races'):
+    #     numToLoad = len(racesToLoad)
+    #     print(f'Loaded {len(racesLoaded)} / {numToLoad} {whatLoaded}')
+
+    #     racesNotLoaded = list(set(racesToLoad) - set(racesLoaded))
+    #     # if len(racesNotLoaded):
+    #     #     print(f'\t{len(racesNotLoaded)} races failed to load: {racesNotLoaded}')
+
+    class _print_loaded:
+        def __init__(self, inds_load, text:str=''):
+            self.load = len(inds_load)
+            self.loaded = 0
+
+            self.time_start = time()
+            self.time_end = time()
+            
+            self.text = text
+            # Update loading message every _t seconds
+            self._t = 5
+            print(f'Loading {self.load} {self.text}', end='\r')
+            self._tt = 1
         
-        racesNotLoaded = list(set(racesToLoad) - set(racesLoaded))
-        # if len(racesNotLoaded):
-        #     print(f'\t{len(racesNotLoaded)} races failed to load: {racesNotLoaded}')
+        def update(self):
+            self.loaded += 1
+            self.time_end = time()
+            # Update every t seconds
+            if (self.time_end - self.time_start) >= self._t * self._tt:
+                print(f'Loading {self.loaded} / {self.load} {self.text}', end='\r')
+                self._tt += 1
+        
+        def done(self):
+            print(f'Loaded {self.loaded} / {self.load} {self.text}', end='')
+
+            mins, secs = self.parse_time()
+            print(f'... in ', end='')
+            if mins > 0:
+                print(f'{mins} mins ', end='')
+            print(f'{secs:0.2f} secs')
+        
+        def parse_time(self):
+            time_total = self.time_end - self.time_start
+            mins = int(time_total // 60)
+            secs = time_total % 60
+            return mins, secs
 
 
     def save(self, obj_pkl):
