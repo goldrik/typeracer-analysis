@@ -30,7 +30,7 @@ USER: str = os.getenv('USER')
 FH_PKL: str = os.getenv('FH_PKL')
 
 FN_PKL_USER = os.path.join(FH_PKL, f'typeracer_{USER}.pkl')
-FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
+# FN_PKL_HTMLS = os.path.join(FH_PKL, f'typeracer_htmls.pkl')
 
 try: 
     userdata
@@ -86,10 +86,12 @@ ind = 2732
 
 ind = 2480
 
+# Time difference and mistake char
 ind = 2407
 # ind = 2382
 
-ind = 821
+# ind = 821
+
 
 
 #%%
@@ -101,7 +103,7 @@ inds = userdata.races.index
 # inds = range(userdata.races.index.max(), 2742, -1)
 
 # inds = [ind]
-# inds = [2747]
+inds = [2407]
 
 # inds = np.concatenate([np.arange(7000, 6500, -1), np.arange(1000, 0, -1)])
 
@@ -139,6 +141,8 @@ for race in inds:
     assert(''.join(C['Char']) == ''.join(TL0['Char']))
     assert(text_ == text)
 
+    # TODO Add a check to see if 4 or more entries at the end are identical
+
     
     assert(''.join(C['Char']) == text)
     assert(''.join(W['Word']) == text)
@@ -161,13 +165,17 @@ for race in inds:
         print("\tTime Difference between TL0 and C:", t_d)
         print('\t', np.where(C['Ms'] - TL0['Ms'])[0])
 
-    C_ = C[~C['Mistake']]
-    assert((C_['Char'] == C_['Typed']).all())
-    C_ = C[C['Mistake']]
-    mt = (C_['Char'] == C_['Typed']).sum()
+    # For characters marked as typed CORRECTLY, check Char == Typed
+    assert((C['Mistake'] | (C['Char'] == C['Typed'])).all())
+    # How many characters were marked MISTAKE, but Char == Typed
+    C_ = (C['Mistake'] & (C['Char'] == C['Typed']))
+    mt = np.count_nonzero(C_)
     if mt:
         MT.append([race, mt])
         print("\tMistake Char has correct Typed Char:", mt)
+        print('\t', np.where(C_)[0])
+        if (C[C_].Char == '.').all():
+            print('\tAll were periods')
 
 
 print(f'\t{ (time()-st):0.2f} secs')

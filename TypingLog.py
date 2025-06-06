@@ -44,7 +44,6 @@ _PATTERN_ENTRIES = r'(\d+)([+\-$])(.)'
 class TypingLog:
     """TypingLog"""
 
-
     def __init__(self, tl: str):
         # Initialize DataFrame vars
         self.clear_data()
@@ -64,7 +63,6 @@ class TypingLog:
         self._tl = [ TypingLog.clean_typinglog(_tl) for _tl in 
                            [tl[:ind], tl[ind+1:]] ]
         
-
     
     # This generates the entries DataFrame and the two "output" DataFrames (chars and words)
     # If that DataFrame is empty, calls parse_entries() to generate it
@@ -72,13 +70,17 @@ class TypingLog:
     def generate(self):
         if self.entries.empty:
             self.parse_entries()
+        if self._chars.empty:
+            self.parse_chars()
         
         # To make processing easier, split these problematic strokes (with consecutive additions)
-        entries_ = self.entries.copy()
+        entries_ = TypingLog.adjust_end_entries(self._chars, self.entries)
         entries_ = TypingLog.split_addition_entries(entries_)
         # Then recreate the text input
         text, partials = TypingLog.generate_typed_input(entries_)
         self.text = text
+
+        assert(text == partials[-1])
 
         # TypingLog DataFrame arrays
         # Save as numpy arrays instead for MUCH faster iteration though DataFrame
@@ -311,6 +313,7 @@ class TypingLog:
                 # 1. First entry gets the whole ms, other entries get 0
                 entries_ms[1:] = 0
                 # 2. Divide between number of entries
+                # TODO: Change this when satisfied with TypingLog parsing
                 # entries_ms = entries_ms / num_entries
 
                 for i, (char_ind_, op, char) in enumerate(entries):
@@ -426,8 +429,12 @@ class TypingLog:
 
 
     # Purely to remove unnecessary dataframes to reduce memory usage
-    def clear_data(self, 
-                   dfs=['entries', 'strokes', 'windows', '_chars', 'chars', 'words']):
+    def clear_data(self, dfs='all'):
+        if dfs == 'all':
+            dfs = ['entries', 'strokes', 'windows', '_chars', 'chars', 'words']
+        elif dfs == 'unnecessary':
+            dfs = ['entries', 'strokes', 'windows', '_chars', 'words']
+        
         if isinstance(dfs, str):
             dfs = [dfs]
 
@@ -489,18 +496,9 @@ class TypingLog:
         
 
         text = ''.join(entries)
-        # Check if there was a duplicate punctuation at the end of the text (TypeRacer bug, or input lag perhaps)
-        # The duplicate characters should be from the same keystroke (probably)
-        # Ignore the ellipses case
-        if len(text) > 3:
-            if text[-1] == text[-2] and TL.iloc[-1]['Stroke'] == TL.iloc[-2]['Stroke'] and text[-3:] != '...':
-                text = text[:-1]
-                states[-1] = states[-1][:-1]
-
         return text, states
     
 
-    
 
     # The typingLog contains some keystrokes consisting of multiple entries
     # Some such keystrokes are just multiple additions in a row
@@ -510,7 +508,6 @@ class TypingLog:
         # For speed, use numpy arrays
         strokes = TL['Stroke'].to_numpy()
         stroke_inds = TL['StrokeInd'].to_numpy()
-        chars = TL['Char'].to_numpy()
         ops = TL['Op'].to_numpy()
 
         # When we split keystrokes, the keystroke numbers will increase for the remaining keystrokes
@@ -518,20 +515,13 @@ class TypingLog:
         stroke_offset = 0
         # Compute indices upfront, since we will be editing the strokes array
         stroke_inds_all = [strokes == s for s in range(strokes[-1]+1)]
-        for s,inds in enumerate(stroke_inds_all):
+        for inds in stroke_inds_all:
             strokes[inds] += stroke_offset
             # Number of entries
             ne = np.count_nonzero(inds)
             # Normal keystroke (w one entry), ignore
             if ne == 1:
                 continue
-
-            # Special case: duplicate punctuation at the end of the text stored as single keystroke
-            if s == len(stroke_inds_all)-1:
-                stroke_full = ''.join(chars[inds])
-                if not stroke_full.endswith('...'): 
-                    if chars[inds][-1] == chars[inds][-2]:
-                        continue
 
             if np.all(ops[inds] == '+'):
                 # Split keystroke
@@ -543,6 +533,57 @@ class TypingLog:
         TL['Stroke'] = strokes
         TL['StrokeInd'] = stroke_inds
         return TL
+    
+
+    # Case: User duoble-taps punctuation at the end of text
+    # The text was correctly typed, but extra punctuation was typed 
+    #   at the end and saved as part of the same keystroke
+        # Check if there was a duplicate punctuation at the end of the text (TypeRacer bug, or input lag perhaps)
+        # The duplicate characters should be from the same keystroke (probably)
+    # Case: User inputs any incorrect character at the end after the text was already completed 
+    @staticmethod
+    def adjust_end_entries(TL0, TL1):
+        TL = TL1.copy()
+
+        # Find the number of duplicate characters at the end of a string
+        num_dups = lambda text: len(text) - len(text.rstrip(text[-1]))
+        
+        # Final keystroke
+        #   may contain multiple character entries
+        end_stroke = TL.iloc[-1]['Stroke']
+        inds_end_stroke = TL['Stroke'] == end_stroke
+        end_chars = ''.join( TL[inds_end_stroke]['Char'] )
+
+        # TRUTH
+        typed_text = ''.join(TL0['Char'])
+        end_char = typed_text[-1]
+        
+        # Find the true number of duplicate characters at the end
+        # Limit the number of duplicates to the length of the stroke
+        dups = min(num_dups(typed_text), len(end_chars))
+
+        # From entries: find the purported end character
+        ind_end = end_chars.rindex(end_char)
+        chars_extra = len(end_chars) - ind_end - 1
+        # Get the number of duplicate characters at 
+        dups_extra = num_dups(end_chars[:ind_end+1]) - dups
+
+        assert(dups_extra >= 0), 'ERROR: adjust_end_entries: dups_extra < 0.\n' + \
+                                 'Means the entries DataFrame does not contains all the existing characters'
+
+        if rows_extra := chars_extra + dups_extra == 0:
+            return TL
+        
+        stroke_ms = TL[inds_end_stroke]['Ms'].to_numpy()
+        ms_extra = stroke_ms[-rows_extra:].sum()
+
+        # Only update the non-zero elements
+        stroke_ms_ = stroke_ms[:-rows_extra]
+        inds_nonzero = stroke_ms_ != 0
+        # Allocate the extra time to these rows
+        stroke_ms_[inds_nonzero] += ms_extra / np.count_nonzero(inds_nonzero)
+
+        return TL[:len(TL)-(chars_extra+dups_extra)].copy()
 
 
     # The typingLog contains two parts, separated by a pipe character
