@@ -33,7 +33,7 @@ from enum import Enum
 class Keyboard:
     """Keyboard"""
 
-    def __init__(self, keyboard='qwerty'):
+    def __init__(self, keyboard='qwerty', data='Value'):
         self.keyboard = keyboard.lower()
 
         if self.keyboard == 'qwerty':
@@ -155,6 +155,9 @@ class Keyboard:
 
         self.keys = {k.key:k for k in keys}
 
+        # For data
+        self.data = data
+
 
 class Finger(Enum):
     PINKY = 0
@@ -177,6 +180,8 @@ class Key:
     finger: Finger
     hand: Hand
     shift: bool
+    # For storing data
+    value: float = -1
 
     @property
     def row(self):
