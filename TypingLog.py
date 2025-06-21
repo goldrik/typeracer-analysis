@@ -335,6 +335,9 @@ class TypingLog:
                 strokes_ms.append(stroke_ms)
                 strokes_window.append(w)
 
+        # Convert char_ms array to float (to account for cases where we adjust the key ms)
+        char_ms = np.array(char_ms, dtype=float)
+
         self.strokes = pd.DataFrame({'Stroke': strokes, 'Ms': strokes_ms, 'Window': strokes_window})
         self.entries = pd.DataFrame({'Window': window_nums, 'WindowInd': window_inds, 'Char': chars, 'Op': ops, 'Ms': char_ms, 'Stroke': stroke_nums, 'StrokeInd': stroke_inds})
         return self.entries, self.strokes, self.windows
@@ -536,9 +539,7 @@ class TypingLog:
     
 
     # Case: User duoble-taps punctuation at the end of text
-    # The text was correctly typed, but extra punctuation was typed 
-    #   at the end and saved as part of the same keystroke
-        # Check if there was a duplicate punctuation at the end of the text (TypeRacer bug, or input lag perhaps)
+    # The text was correctly typed, but extra char(s) were typed at the end and saved as part of the same keystroke
         # The duplicate characters should be from the same keystroke (probably)
     # Case: User inputs any incorrect character at the end after the text was already completed 
     @staticmethod
@@ -571,7 +572,7 @@ class TypingLog:
         assert(dups_extra >= 0), 'ERROR: adjust_end_entries: dups_extra < 0.\n' + \
                                  'Means the entries DataFrame does not contains all the existing characters'
 
-        if rows_extra := chars_extra + dups_extra == 0:
+        if (rows_extra := chars_extra + dups_extra) == 0:
             return TL
         
         stroke_ms = TL[inds_end_stroke]['Ms'].to_numpy()
