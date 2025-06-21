@@ -16,7 +16,7 @@ _profile_attrs = [
     'Name', 'StartDate', 'Location', 'Keyboard', 'Races', 'AverageWPM', 'BestWPM', 'Avatar'
 ]
 _race_attrs = {
-    'DateTime': object, 'WPM': int, 'Accuracy': float, 'Rank': int, 'NumRacers': int, 'Opponents': object,
+    'DateTime': object, 'EndTime': object, 'WPM': int, 'Accuracy': float, 'Rank': int, 'NumRacers': int, 'Opponents': object,
     'TextID': int, 'TypedText': str, 'TypingLog': str,
 }
 _racer_attrs = [
@@ -163,13 +163,14 @@ class TypeRacerUser:
                 print(f'\t{url}')
                 continue
 
-            races_dict['DateTime'].append(R['Date'])
+            races_dict['EndTime'].append(R['Date'])
             races_dict['WPM'].append(R['Speed'])
             races_dict['Accuracy'].append(R['Accuracy'])
             races_dict['Rank'].append(R['Rank'])
             races_dict['NumRacers'].append(R['NumRacers'])
             races_dict['Opponents'].append(O['Users'])
             races_dict['TextID'].append(textID)
+
 
             self._opponents[race] = {'Names': O['Users'], 'Races': O['Races'], 'Ranks': O['Ranks']}
             
@@ -180,6 +181,11 @@ class TypeRacerUser:
 
             races_dict['TypedText'].append(typedText)
             races_dict['TypingLog'].append(tl)
+
+            # The "DateTime" given by TypeRacer is the user's end time
+            # Compute start time using WPM and text length
+            start_time = R['Date'] - timedelta(seconds = 60 * len(typedText) / 5 / R['Speed'])
+            races_dict['DateTime'].append( start_time )
 
             races_inds.append(race)
             P.update()
