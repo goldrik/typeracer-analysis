@@ -1,6 +1,7 @@
 # Aurik Sarker
 # 09 May 2025
 
+import numpy as np
 import pandas as pd
 import pickle
 import os
@@ -115,7 +116,7 @@ class TypeRacerUser:
         try:
             soup = read_url(url)[1]
         except:
-            print(f'Failed to read profile. TypeRacerUser object instantiation likely failed, though you may still attempt to load races')
+            print('Failed to read profile. TypeRacerUser object instantiation likely failed, though you may still attempt to load races')
             print(f'\t{url}')
             return
         
@@ -270,7 +271,7 @@ class TypeRacerUser:
         players_details = {
             'Users': [TypeRacerUser.GUEST] * N,
             'WPMs': [-1] * N,
-            'Accs': [np.nan] * N,
+            'Accs': [-1.] * N,
             'TLs': [''] * N
         }
 
@@ -366,7 +367,7 @@ class TypeRacerUser:
             try:
                 _, soup = read_url(url)
             except:
-                print(f'Failed to read webpage. Results loading halted')
+                print('Failed to read webpage. Results loading halted')
                 print(f'\t{url}')
                 break
             
@@ -470,7 +471,7 @@ class TypeRacerUser:
             print(f'Loaded {self.loaded} / {self.load} {self.text}', end='')
 
             mins, secs = self.parse_time()
-            print(f'... in ', end='')
+            print('... in ', end='')
             if mins > 0:
                 print(f'{mins} mins ', end='')
             print(f'{secs:0.2f} secs')
