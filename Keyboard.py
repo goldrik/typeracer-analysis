@@ -165,7 +165,7 @@ class Keyboard:
         self.data = data
 
 
-    def plot(self, plot_values=True):
+    def plot(self, plot_values=True, cm_range=None):
         fig, axs = plt.subplots(2,1)
         [ax.set_xlim(-1, 14) for ax in axs]
         [ax.set_ylim(-1, 5) for ax in axs]
@@ -174,24 +174,6 @@ class Keyboard:
         [ax.set_aspect('equal') for ax in axs]
 
         keys = self.keys.values()
-
-        for key in keys:
-            _key = key.key
-
-            # Which axes to plot
-            _axs = [int(key.shift)]
-            fw = 'bold'
-            if _key in ['ctrl', 'shift', ' ', '\b']:
-                _axs = [0,1]
-                fw = 'normal'
-            
-            if _key == ' ':
-                _key = 'space'
-            if _key == '\b':
-                _key = 'del'
-
-            # Plot the keys (as text)
-            [axs[_a].text(key.loc[0], key.loc[1], _key, fontweight=fw, ha='center', va='center') for _a in _axs]
 
 
         # ! This gets reversed after adding colorbar
@@ -209,32 +191,59 @@ class Keyboard:
                 _vmin = np.nanmin(vals)
                 _vmax = np.nanmax(vals)
 
-                vmin = 0
-                vmax = 1
-                if _vmin < 0 or _vmax > 1:
-                    vmin = _vmin
-                    vmax = _vmax
+                if cm_range is None:
+                    vmin = 0
+                    vmax = 1
+                    if _vmin < 0 or _vmax > 1:
+                        vmin = _vmin
+                        vmax = _vmax
+                else:
+                    vmin = cm_range[0]
+                    vmax = cm_range[1]
                 
                 for key in keys:
                     val = key.value
                     if not np.isnan(val):
                         # Normalize value between 0 and 1
                         nval = (val-vmin)/(vmax-vmin)
-                        color = plt.cm.jet( nval ) 
+                        nval = min(max(nval, 0), 1)
+                        color = plt.cm.jet( float(nval) ) [:-1]
 
                         # Add a kind of blurring/ripple effect
-                        [[axs[_a].scatter(key.loc[0], key.loc[1], s=s, color=color, alpha=a) for _a in _axs] 
-                            for s,a in zip([32, 128, 256], [0.20, 0.10, 0.05])]
+                        _s = [50, 200, 400]
+                        _a = [0.25, 0.20, 0.10]
+                        # _s = [50]
+                        # _a = [1.0]
+                        [axs[ int(key.shift) ].scatter(key.loc[0], key.loc[1], s=s, color=color, alpha=a) for s,a in zip(_s, _a)]
 
                 # Colorbar
                 sm = plt.cm.ScalarMappable(cmap='jet', norm=plt.Normalize(vmin, vmax))
                 cbar = fig.colorbar(sm, ax=axs, shrink=0.80)
-                cbar.set_label(self.data, fontweight='bold', rotation=270, x=-12)
+                cbar.set_label(self.data, fontsize=12, fontweight='bold', rotation=270, x=-15)
                 cbar.set_ticks([vmin, vmax])
 
 
+        # Plot the keys (as text)
+        for key in keys:
+            _key = key.key
+
+            # Which axes to plot
+            _axs = [int(key.shift)]
+            fw = 'bold'
+            if _key in ['ctrl', 'shift', ' ', '\b']:
+                _axs = [0,1]
+                fw = 'normal'
+            
+            if _key == ' ':
+                _key = 'space'
+            if _key == '\b':
+                _key = 'del'
+
+            [axs[_a].text(key.loc[0], key.loc[1], _key, fontweight=fw, ha='center', va='center') for _a in _axs]
+
+
         # fig.tight_layout()
-        return fig
+        return fig, axs
 
 
 class Finger(Enum):
@@ -272,10 +281,5 @@ class Key:
     def dist(self, key):
         return math.sqrt((self.loc[0] - key.loc[0])**2 + (self.loc[1] - key.loc[1])**2), \
                int(self.loc[0] - key.loc[0]), int(self.loc[1] - key.loc[1])
-
-    # TODO: Remove - for debugging only
-    def randval(self):
-        if random.random() < 0.8:
-            self.value = random.random()
 
 
